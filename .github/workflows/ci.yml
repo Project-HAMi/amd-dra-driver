@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/project-hami/amd-dra-driver
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Verify amd-hami-core submodule
+        run: |
+          test -f ./amd-hami-core/Makefile.hip
+          test -d ./amd-hami-core/src
+
+      # The driver uses cgo against the vendored AMD SMI library. Tests run as a
+      # non-root user: one upstream VFIO test fails as root.
+      - name: Run unit tests
+        run: >-
+          docker run --rm
+          --user "$(id -u):$(id -g)"
+          --env HOME=/tmp --env GOCACHE=/tmp/gocache --env GOPATH=/tmp/gopath
+          --env GOFLAGS=-buildvcs=false
+          --env LD_LIBRARY_PATH=/src/third_party/amd_smi/lib
+          --volume "$PWD:/src" --workdir /src
+          "golang:$(awk '/^go /{print $2}' go.mod)"
+          sh -c 'go vet ./cmd/... ./pkg/... && go test -race ./cmd/... ./pkg/...'
+
+  helm:
+    name: Lint Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+        with:
+          version: v3.20.2
+
+      - name: Lint chart
+        run: helm lint ./helm-charts-k8s --namespace kube-amd-gpu
+
+      - name: Render chart
+        run: |
+          helm template amd-dra-driver ./helm-charts-k8s --namespace kube-amd-gpu >/dev/null
+          # the GPU sharing branch renders too
+          helm template amd-dra-driver ./helm-charts-k8s --namespace kube-amd-gpu \
+            --set featureGates.GPUSharing=true,kubeletPlugin.vgpuHookHostPath=/usr/local/vgpu/amd-dra/libamvgpu.so >/dev/null
+
+  image:
+    name: Build and publish image
+    needs:
+      - test
+      - helm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Read Go version
+        id: go
+        run: echo "version=$(awk '/^go /{print $2}' go.mod)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and optionally publish image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: deployments/container/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GOLANG_VERSION=${{ steps.go.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Attest build provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

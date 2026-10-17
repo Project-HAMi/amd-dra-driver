@@ -110,7 +110,8 @@ repository:
         comment: |
           Static analysis on pull requests via GitHub Actions.
       - name: GitHub secret scanning
-        type: secret
+        # OpenSSF baseline scanners before v0.32.1 only read secret-scanning.
+        type: secret-scanning
         version: latest
         rulesets:
           - built-in

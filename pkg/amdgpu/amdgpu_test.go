@@ -38,3 +38,15 @@ func TestSemverDriverVersion(t *testing.T) {
 		})
 	}
 }
+
+func TestProductNameAttribute(t *testing.T) {
+	for raw, want := range map[string]string{
+		"AMD Radeon Graphics":          "AMD_Radeon_Graphics",
+		" AMD Instinct MI300X (OAM)\n": "AMD_Instinct_MI300X_OAM",
+		"":                             "",
+	} {
+		if got := ProductNameAttribute(raw); got != want {
+			t.Errorf("ProductNameAttribute(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}

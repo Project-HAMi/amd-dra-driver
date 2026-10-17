@@ -68,6 +68,12 @@ func SemverDriverVersion(version string) string {
 	return strings.Join(parts[:3], ".")
 }
 
+// ProductNameAttribute turns a GPU product name into the productName attribute
+// form, e.g. "AMD Instinct MI300X (OAM)" into "AMD_Instinct_MI300X_OAM".
+func ProductNameAttribute(raw string) string {
+	return strings.NewReplacer(" ", "_", "(", "", ")", "").Replace(strings.TrimSpace(raw))
+}
+
 // GetAMDGPUs return a map of AMD GPU on a node identified by the part of the pci address
 func GetAMDGPUs() map[string]map[string]interface{} {
 	if _, err := os.Stat("/sys/module/amdgpu/drivers/"); err != nil {
@@ -147,8 +153,7 @@ func GetAMDGPUs() map[string]map[string]interface{} {
 		if b, err := os.ReadFile(productNamePath); err != nil {
 			glog.Warningf("Failed to read product name from %s: %s", productNamePath, err)
 		} else {
-			replacer := strings.NewReplacer(" ", "_", "(", "", ")", "")
-			productName = replacer.Replace(strings.TrimSpace(string(b)))
+			productName = ProductNameAttribute(string(b))
 		}
 
 		sysfsDeviceID := GetDeviceID(fmt.Sprintf("card%d", card))

@@ -151,3 +151,13 @@ func TestGetDevicePublishesUUID(t *testing.T) {
 	gpu.UUID = "33ff7590-0000-1000-8021-340866ba8c47"
 	assert.Equal(t, "33ff7590-0000-1000-8021-340866ba8c47", *gpu.GetDevice().Attributes["uuid"].StringValue)
 }
+
+func TestGPUBrand(t *testing.T) {
+	assert.Equal(t, "Radeon", gpuBrand("AMD_Radeon_RX_9060_XT"))
+	assert.Equal(t, "Instinct", gpuBrand("AMD_Instinct_MI300X_OAM"))
+	assert.Equal(t, "", gpuBrand(""))
+
+	gpu := rx9060xt()
+	gpu.ProductName = "AMD_Radeon_RX_9060_XT"
+	assert.Equal(t, "Radeon", *gpu.GetDevice().Attributes["brand"].StringValue)
+}

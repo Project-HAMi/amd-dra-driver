@@ -17,17 +17,62 @@ limitations under the License.
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	resourceapi "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	klog "k8s.io/klog/v2"
 	cdispec "tags.cncf.io/container-device-interface/specs-go"
 )
 
 // vgpuHookContainerPath is where the vGPU hook is mounted in the container. It
 // matches the path HAMi's device plugin uses, so images and docs carry over.
 const vgpuHookContainerPath = "/usr/local/vgpu/libamvgpu.so"
+
+// installVGPUHook copies the image-bundled hook to dst, which the driver
+// container sees at the same path as the host. The copy goes through a
+// temporary file and a rename, so a container started meanwhile never maps a
+// partly written library. A missing source keeps whatever hook dst already has.
+func installVGPUHook(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if os.IsNotExist(err) {
+		klog.Warningf("No bundled vGPU hook at %s; using the hook already at %s", src, dst)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read vGPU hook: %w", err)
+	}
+	if cur, err := os.ReadFile(dst); err == nil && bytes.Equal(cur, data) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("create vGPU hook directory: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".libamvgpu-*.so")
+	if err != nil {
+		return fmt.Errorf("stage vGPU hook: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("stage vGPU hook: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("stage vGPU hook: %w", err)
+	}
+	if err := os.Chmod(tmp.Name(), 0o555); err != nil {
+		return fmt.Errorf("stage vGPU hook: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), dst); err != nil {
+		return fmt.Errorf("install vGPU hook: %w", err)
+	}
+	klog.Infof("Installed vGPU hook at %s", dst)
+	return nil
+}
 
 // gpuSliceEdits returns the container edits that confine one share of a whole
 // GPU to the memory and computeUnits its allocation result consumed, and the

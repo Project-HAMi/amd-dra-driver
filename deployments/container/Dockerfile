@@ -29,6 +29,17 @@
 
 ARG GOLANG_VERSION=undefined
 ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:9.6
+# HAMi's vGPU hook (libamvgpu.so) from the amd-hami-core submodule, built on the
+# same ROCm image the HAMi AMD device plugin uses. The driver installs it on the
+# node at startup so GPUSharing can enforce memory slices.
+FROM rocm/dev-ubuntu-22.04:7.2.4@sha256:a50a8547101ac9e7c35848ff609a56335214b789b468c9eb05dcd006a4a38c25 as hook
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    cmake build-essential \
+    && rm -rf /var/lib/apt/lists/*
+COPY amd-hami-core/ /build/amd-hami-core/
+RUN cd /build/amd-hami-core && make -f Makefile.hip clean all \
+    && test -s build-hip/libamvgpu.so
+
 FROM golang:${GOLANG_VERSION} as build
 
 WORKDIR /build
@@ -66,6 +77,7 @@ COPY --from=build /build/third_party/amd_smi/lib/librocm_sysdeps_*.so* /usr/lib6
 COPY --from=build /build/third_party/amd_smi/lib/libdrm*.so* /usr/lib64/
 
 COPY --from=build /artifacts/gpu-kubeletplugin /usr/bin/gpu-kubeletplugin
+COPY --from=hook /build/amd-hami-core/build-hip/libamvgpu.so /opt/hami/lib/amd/libamvgpu.so
 COPY --from=build /artifacts/webhook           /usr/bin/webhook
 
 ENV LD_LIBRARY_PATH=/usr/lib64

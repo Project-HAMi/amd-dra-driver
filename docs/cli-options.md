@@ -18,6 +18,7 @@ allocation requests.
 | `--kubelet-plugins-directory-path` | string | `/var/lib/kubelet/plugins` | `KUBELET_PLUGINS_DIRECTORY_PATH` | Absolute path to the directory where kubelet stores plugin data. |
 | `--healthcheck-port` | int | `-1` | `HEALTHCHECK_PORT` | Port for the gRPC healthcheck service. A positive value uses that port, `0` allocates a random port, and a negative value disables the service. |
 | `--vgpu-hook-host-path` | string | *(empty)* | `VGPU_HOOK_HOST_PATH` | Host path of HAMi's vGPU hook (`libamvgpu.so`). Under the `GPUSharing` gate it is mounted into containers that get a memory slice and loaded with `LD_AUDIT` to enforce `HIP_DEVICE_MEMORY_LIMIT_0`. Empty leaves memory slices unenforced. |
+| `--vgpu-hook-source` | string | `/opt/hami/lib/amd/libamvgpu.so` | `VGPU_HOOK_SOURCE` | The hook bundled in the driver image (built from the `amd-hami-core` submodule). Under the `GPUSharing` gate it is copied to `--vgpu-hook-host-path` at startup when it differs from the file there. |
 
 ### Kubernetes client flags
 

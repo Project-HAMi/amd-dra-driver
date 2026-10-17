@@ -17,6 +17,8 @@ limitations under the License.
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -113,4 +115,32 @@ func TestApplyGPUSliceAvoidsPreparedShares(t *testing.T) {
 	require.NoError(t, state.applyGPUSlice(device, result, prepared, nil))
 	assert.Equal(t, 16, device.ComputeUnits[0])
 	assert.Contains(t, device.ContainerEdits.Env, "HSA_CU_MASK=0:16-31")
+}
+
+func TestInstallVGPUHook(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "bundled.so")
+	dst := filepath.Join(dir, "host", "vgpu", "libamvgpu.so")
+	require.NoError(t, os.WriteFile(src, []byte("hook-v1"), 0o644))
+
+	require.NoError(t, installVGPUHook(src, dst))
+	got, err := os.ReadFile(dst)
+	require.NoError(t, err)
+	assert.Equal(t, "hook-v1", string(got))
+	info, err := os.Stat(dst)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o555), info.Mode().Perm())
+
+	// An updated image replaces the installed hook.
+	require.NoError(t, os.WriteFile(src, []byte("hook-v2"), 0o644))
+	require.NoError(t, installVGPUHook(src, dst))
+	got, _ = os.ReadFile(dst)
+	assert.Equal(t, "hook-v2", string(got))
+
+	// Without a bundled hook the one on the node is kept.
+	require.NoError(t, installVGPUHook(filepath.Join(dir, "missing.so"), dst))
+	got, _ = os.ReadFile(dst)
+	assert.Equal(t, "hook-v2", string(got))
+	entries, _ := os.ReadDir(filepath.Dir(dst))
+	assert.Len(t, entries, 1, "no temporary files are left behind")
 }

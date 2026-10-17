@@ -117,6 +117,12 @@ func NewDeviceState(config *Config) (*DeviceState, error) {
 		return nil, fmt.Errorf("error enumerating devices: %v", err)
 	}
 
+	if featuregates.Enabled(featuregates.GPUSharing) && config.flags.vgpuHookHostPath != "" {
+		if err := installVGPUHook(config.flags.vgpuHookSource, config.flags.vgpuHookHostPath); err != nil {
+			return nil, err
+		}
+	}
+
 	cdi, err := NewCDIHandler(config)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create CDI handler: %v", err)

@@ -55,7 +55,8 @@ kubeletPlugin:
   kubeletRegistrarDirectoryPath: /var/lib/kubelet/plugins_registry
   kubeletPluginsDirectoryPath: /var/lib/kubelet/plugins
   # Host path of HAMi's vGPU hook (libamvgpu.so) that enforces memory slices
-  # under the GPUSharing feature gate, e.g. /usr/local/vgpu/libamvgpu.so.
+  # under the GPUSharing feature gate, e.g. /usr/local/vgpu/libamvgpu.so. The
+  # driver installs the hook bundled in its image there at startup.
   # Empty leaves memory slices unenforced; CU slices still apply.
   vgpuHookHostPath: ""
   containers:

@@ -67,6 +67,7 @@ type Flags struct {
 	kubeletPluginsDirectoryPath   string
 	healthcheckPort               int
 	vgpuHookHostPath              string
+	vgpuHookSource                string
 }
 
 type Config struct {
@@ -132,6 +133,13 @@ func newApp() *cli.App {
 			Usage:       "Host path of the vGPU hook (HAMi's libamvgpu.so) that enforces memory slices under the GPUSharing gate. Empty leaves memory slices unenforced.",
 			Destination: &flags.vgpuHookHostPath,
 			EnvVars:     []string{"VGPU_HOOK_HOST_PATH"},
+		},
+		&cli.StringFlag{
+			Name:        "vgpu-hook-source",
+			Usage:       "Path in the driver image of the vGPU hook that is installed to --vgpu-hook-host-path at startup under the GPUSharing gate.",
+			Value:       "/opt/hami/lib/amd/libamvgpu.so",
+			Destination: &flags.vgpuHookSource,
+			EnvVars:     []string{"VGPU_HOOK_SOURCE"},
 		},
 	}
 	cliFlags = append(cliFlags, flags.kubeClientConfig.Flags()...)

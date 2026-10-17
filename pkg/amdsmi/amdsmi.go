@@ -23,6 +23,43 @@ package amdsmi
 #cgo CFLAGS: -I${SRCDIR}/../../third_party/amd_smi/include
 #cgo LDFLAGS: -L${SRCDIR}/../../third_party/amd_smi/lib -lamd_smi
 #include "amdsmi.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static amdsmi_status_t identity_for_bdf(const char *bdf_text, char *uuid,
+                                        char *market_name) {
+	unsigned long long domain;
+	unsigned int bus, device, function;
+	char trailing;
+	if (sscanf(bdf_text, "%llx:%x:%x.%x%c", &domain, &bus, &device, &function,
+	           &trailing) != 4 || bus > 0xff || device > 0x1f || function > 7) {
+		return AMDSMI_STATUS_INVAL;
+	}
+	amdsmi_bdf_t bdf = {0};
+	bdf.bdf.domain_number = domain;
+	bdf.bdf.bus_number = bus;
+	bdf.bdf.device_number = device;
+	bdf.bdf.function_number = function;
+	amdsmi_processor_handle processor = NULL;
+	amdsmi_status_t status = amdsmi_get_processor_handle_from_bdf(bdf, &processor);
+	if (status != AMDSMI_STATUS_SUCCESS) {
+		return status;
+	}
+	unsigned int uuid_length = AMDSMI_GPU_UUID_SIZE;
+	status = amdsmi_get_gpu_device_uuid(processor, &uuid_length, uuid);
+	if (status != AMDSMI_STATUS_SUCCESS) {
+		return status;
+	}
+	amdsmi_asic_info_t asic_info;
+	memset(&asic_info, 0, sizeof(asic_info));
+	status = amdsmi_get_gpu_asic_info(processor, &asic_info);
+	if (status != AMDSMI_STATUS_SUCCESS) {
+		return status;
+	}
+	snprintf(market_name, AMDSMI_MAX_STRING_LENGTH, "%s", asic_info.market_name);
+	return AMDSMI_STATUS_SUCCESS;
+}
 */
 import "C"
 import (
@@ -32,6 +69,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	klog "k8s.io/klog/v2"
 )
@@ -382,3 +420,42 @@ func SetMemoryPartition(gpuIndex int, mode string) error {
 // Note: the driver reload that must follow a memory-partition change no longer
 // lives here. ROCm 10.0 removed amdsmi_gpu_driver_reload(), so the inbox amdgpu
 // module is reloaded directly via modprobe; see kmm.ReloadInboxDriver.
+
+// Identity is how AMD SMI names a GPU: the device UUID and the ASIC market
+// name. HAMi's AMD device plugin registers GPUs with the same two values.
+type Identity struct {
+	UUID       string
+	MarketName string
+}
+
+// GPUIdentities looks up the Identity of each GPU by PCI address (e.g.
+// "0000:19:00.0"). It is best effort: GPUs AMD SMI cannot resolve are left
+// out and logged. It reuses the session opened by Init, or opens and closes its
+// own one.
+func GPUIdentities(pciAddresses []string) map[string]Identity {
+	initMu.Lock()
+	defer initMu.Unlock()
+
+	if !initDone {
+		if ret := C.amdsmi_init(C.AMDSMI_INIT_AMD_GPUS); ret != C.AMDSMI_STATUS_SUCCESS {
+			klog.Warningf("amdsmi_init failed with status %d; GPU uuid and market name are not published", int(ret))
+			return nil
+		}
+		defer C.amdsmi_shut_down()
+	}
+
+	ids := make(map[string]Identity, len(pciAddresses))
+	for _, addr := range pciAddresses {
+		cAddr := C.CString(addr)
+		var uuid [C.AMDSMI_GPU_UUID_SIZE]C.char
+		var name [C.AMDSMI_MAX_STRING_LENGTH]C.char
+		ret := C.identity_for_bdf(cAddr, &uuid[0], &name[0])
+		C.free(unsafe.Pointer(cAddr))
+		if ret != C.AMDSMI_STATUS_SUCCESS {
+			klog.Warningf("AMD SMI identity lookup failed for GPU %s with status %d", addr, int(ret))
+			continue
+		}
+		ids[addr] = Identity{UUID: strings.TrimSpace(C.GoString(&uuid[0])), MarketName: strings.TrimSpace(C.GoString(&name[0]))}
+	}
+	return ids
+}

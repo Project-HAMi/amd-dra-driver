@@ -81,6 +81,9 @@ func (d *AmdGpuInfo) GetDevice() resourceapi.Device {
 	if d.DeviceID != "" {
 		attributes["deviceID"] = resourceapi.DeviceAttribute{StringValue: ptr.To(d.DeviceID)}
 	}
+	if d.UUID != "" {
+		attributes["uuid"] = resourceapi.DeviceAttribute{StringValue: ptr.To(d.UUID)}
+	}
 	if d.PartitionProfile != "" {
 		attributes["partitionProfile"] = resourceapi.DeviceAttribute{StringValue: ptr.To(d.PartitionProfile)}
 	}

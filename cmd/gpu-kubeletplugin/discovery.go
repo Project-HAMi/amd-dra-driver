@@ -37,6 +37,7 @@ import (
 	"sort"
 
 	"github.com/ROCm/k8s-gpu-dra-driver/pkg/amdgpu"
+	"github.com/ROCm/k8s-gpu-dra-driver/pkg/amdsmi"
 	"github.com/ROCm/k8s-gpu-dra-driver/pkg/consts"
 	"github.com/ROCm/k8s-gpu-dra-driver/pkg/featuregates"
 	"k8s.io/dynamic-resource-allocation/deviceattribute"
@@ -384,4 +385,34 @@ func enumerateAllPossibleDevices(enableSyntheticPartition bool) (AllocatableDevi
 		klog.Infof("Discovered %d AMD GPU devices", len(alldevices))
 	}
 	return alldevices, gpuPCIAddresses, partitionableGPUs, nil
+}
+
+// fillGPUIdentities sets the AMD SMI device UUID of each whole GPU, and its
+// market name where sysfs has no product_name (RDNA cards, for example), so the
+// published uuid and productName match how HAMi's AMD device plugin names the
+// GPU.
+func fillGPUIdentities(allocatable AllocatableDevices) {
+	var addrs []string
+	for _, d := range allocatable {
+		if d.AmdGpu != nil {
+			addrs = append(addrs, d.AmdGpu.PCIAddress)
+		}
+	}
+	if len(addrs) == 0 {
+		return
+	}
+	ids := amdsmi.GPUIdentities(addrs)
+	for _, d := range allocatable {
+		if d.AmdGpu == nil {
+			continue
+		}
+		id, ok := ids[d.AmdGpu.PCIAddress]
+		if !ok {
+			continue
+		}
+		d.AmdGpu.UUID = id.UUID
+		if d.AmdGpu.ProductName == "" {
+			d.AmdGpu.ProductName = amdgpu.ProductNameAttribute(id.MarketName)
+		}
+	}
 }

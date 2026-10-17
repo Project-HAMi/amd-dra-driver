@@ -116,6 +116,7 @@ func NewDeviceState(config *Config) (*DeviceState, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error enumerating devices: %v", err)
 	}
+	fillGPUIdentities(allocatable)
 
 	if featuregates.Enabled(featuregates.GPUSharing) && config.flags.vgpuHookHostPath != "" {
 		if err := installVGPUHook(config.flags.vgpuHookSource, config.flags.vgpuHookHostPath); err != nil {

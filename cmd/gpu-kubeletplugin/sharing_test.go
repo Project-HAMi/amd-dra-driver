@@ -144,3 +144,10 @@ func TestInstallVGPUHook(t *testing.T) {
 	entries, _ := os.ReadDir(filepath.Dir(dst))
 	assert.Len(t, entries, 1, "no temporary files are left behind")
 }
+
+func TestGetDevicePublishesUUID(t *testing.T) {
+	gpu := rx9060xt()
+	assert.NotContains(t, gpu.GetDevice().Attributes, resourceapi.QualifiedName("uuid"))
+	gpu.UUID = "33ff7590-0000-1000-8021-340866ba8c47"
+	assert.Equal(t, "33ff7590-0000-1000-8021-340866ba8c47", *gpu.GetDevice().Attributes["uuid"].StringValue)
+}

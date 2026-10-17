@@ -1,6 +1,7 @@
 # HAMi AMD DRA Driver
 
-[![Image](https://github.com/Project-HAMi/amd-dra-driver/actions/workflows/hami-image.yaml/badge.svg)](https://github.com/Project-HAMi/amd-dra-driver/actions/workflows/hami-image.yaml)
+[![CI](https://github.com/Project-HAMi/amd-dra-driver/actions/workflows/ci.yml/badge.svg)](https://github.com/Project-HAMi/amd-dra-driver/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Project-HAMi/amd-dra-driver/badge)](https://securityscorecards.dev/viewer/?uri=github.com/Project-HAMi/amd-dra-driver)
 [![License](https://img.shields.io/github/license/Project-HAMi/amd-dra-driver)](LICENSE)
 
 A Kubernetes Dynamic Resource Allocation (DRA) driver that lets [HAMi](https://github.com/Project-HAMi/HAMi) share AMD GPUs between pods. Several ResourceClaims can each take a slice of one GPU, and each pod is limited to its share of the GPU's compute units and memory. It is the driver behind the `amd` vendor of [HAMi-DRA](https://github.com/Project-HAMi/HAMi-DRA).
@@ -100,4 +101,4 @@ Run as a non-root user: `TestBindToDriver/bind_failure_clears_driver_override` f
 
 ## Upstream
 
-Changes from [ROCm/k8s-gpu-dra-driver](https://github.com/ROCm/k8s-gpu-dra-driver) `develop` are merged in from the `upstream` remote. The driver name `gpu.amd.com` and the Go module path are unchanged to keep those merges simple, and the upstream workflows stay in place but only run in the ROCm repository.
+Changes from [ROCm/k8s-gpu-dra-driver](https://github.com/ROCm/k8s-gpu-dra-driver) `develop` are merged in from the `upstream` remote. The driver name `gpu.amd.com` and the Go module path are unchanged to keep those merges simple, and the ROCm-only workflows are not kept.

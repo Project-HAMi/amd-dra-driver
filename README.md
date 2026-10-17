@@ -1,5 +1,7 @@
 # AMD GPU Kubernetes Driver for Dynamic Resource Allocation (DRA)
 
+> **HAMi fork.** This repository is based on [ROCm/k8s-gpu-dra-driver](https://github.com/ROCm/k8s-gpu-dra-driver) and adds the `GPUSharing` feature gate, which lets several ResourceClaims share one whole GPU and enforces each slice with `HSA_CU_MASK` and HAMi's `libamvgpu.so` hook ([cli-options](docs/cli-options.md#driver-feature-gates)). It is the driver behind the `amd` vendor of [HAMi-DRA](https://github.com/Project-HAMi/HAMi-DRA). The sharing change is also proposed upstream in ROCm/k8s-gpu-dra-driver#129, and upstream changes are merged in from ROCm.
+
 This repository implements an AMD GPU resource driver for Kubernetes' Dynamic
 Resource Allocation (DRA) feature. The driver exposes device classes and
 implements allocation and lifecycle behavior for GPU resources on nodes.

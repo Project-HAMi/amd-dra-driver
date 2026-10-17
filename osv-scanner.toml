@@ -1,0 +1,12 @@
+# OSV lists these k8s.io/kubernetes advisories for every module version, since
+# the module is not versioned like the Kubernetes release it describes. They are
+# about the GitRepo volume plugin and a kube-apiserver race; this driver only
+# imports kubelet's checkpointmanager from that module and runs neither.
+
+[[IgnoredVulns]]
+id = "GO-2025-3521"
+reason = "GitRepo volume in kubelet; not used by this driver"
+
+[[IgnoredVulns]]
+id = "GO-2025-3547"
+reason = "kube-apiserver race; not used by this driver"

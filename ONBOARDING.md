@@ -79,7 +79,6 @@ Main flags: `--feature-gates GPUSharing=true`, `--vgpu-hook-host-path`, `--vgpu-
 git clone --recurse-submodules https://github.com/Project-HAMi/amd-dra-driver.git
 cd amd-dra-driver
 docker build -f deployments/container/Dockerfile \
-  --build-arg GOLANG_VERSION=$(awk '/^go /{print $2}' go.mod) \
   -t amd-dra-driver .
 LD_LIBRARY_PATH=$PWD/third_party/amd_smi/lib go test ./cmd/... ./pkg/...
 ```

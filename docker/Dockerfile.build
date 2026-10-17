@@ -15,8 +15,7 @@
 # docker/Dockerfile.devel
 # Minimal dev image for Makefile targets (build, lint, generate, etc.)
 
-ARG GOLANG_VERSION=1.27.2
-FROM golang:${GOLANG_VERSION}-bookworm
+FROM golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
 
 # Basic build tooling; keep it small
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -32,11 +31,12 @@ ENV CGO_ENABLED=1
 ARG CT_VERSION=v0.17.0
 ARG GOLANGCI_LINT_VERSION=v1.64.8
 
-# Install Go-based tools directly into /go/bin
+# Install Go-based tools directly into /go/bin. ineffassign v0.2.0 and misspell
+# v0.3.4 are pinned by commit.
 RUN go install sigs.k8s.io/controller-tools/cmd/controller-gen@${CT_VERSION} && \
     go install github.com/golangci/golangci-lint/cmd/golangci-lint@${GOLANGCI_LINT_VERSION} && \
-    go install github.com/gordonklaus/ineffassign@latest && \
-    go install github.com/client9/misspell/cmd/misspell@latest
+    go install github.com/gordonklaus/ineffassign@44548fda05c113cf0ecbac2921a332c7a13fda51 && \
+    go install github.com/client9/misspell/cmd/misspell@b90dc15cfd220ecf8bbc9043ecb928cef381f011
 
 # Default workdir
 WORKDIR /workspace

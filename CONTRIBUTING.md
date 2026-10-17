@@ -17,7 +17,6 @@ By participating you are expected to uphold it.
   ```sh
   git clone --recurse-submodules https://github.com/Project-HAMi/amd-dra-driver.git
   docker build -f deployments/container/Dockerfile \
-    --build-arg GOLANG_VERSION=$(awk '/^go /{print $2}' go.mod) \
     -t amd-dra-driver:dev .
   ```
 

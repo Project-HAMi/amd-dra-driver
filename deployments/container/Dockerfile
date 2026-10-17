@@ -27,8 +27,6 @@
 # limitations under the License.
 #
 
-ARG GOLANG_VERSION=undefined
-ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:9.6
 # HAMi's vGPU hook (libamvgpu.so) from the amd-hami-core submodule, built on the
 # same ROCm image the HAMi AMD device plugin uses. The driver installs it on the
 # node at startup so GPUSharing can enforce memory slices.
@@ -40,7 +38,7 @@ COPY amd-hami-core/ /build/amd-hami-core/
 RUN cd /build/amd-hami-core && make -f Makefile.hip clean all \
     && test -s build-hip/libamvgpu.so
 
-FROM golang:${GOLANG_VERSION} as build
+FROM golang:1.27.2@sha256:820153096fda4de6ac1b7194d12e416b7dd8f4e9a33d17e0345b111b945162d8 as build
 
 WORKDIR /build
 COPY . .
@@ -49,7 +47,7 @@ ENV CGO_ENABLED=1
 RUN mkdir /artifacts && \
     make PREFIX=/artifacts cmds
 
-FROM ${BASE_IMAGE}
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6@sha256:34880b64c07f28f64d95737f82f891516de9a3b43583f39970f7bf8e4cfa48b7
 
 LABEL io.k8s.display-name="AMD GPU Driver for Dynamic Resource Allocation (DRA)"
 LABEL name="AMD GPU Driver for Dynamic Resource Allocation (DRA)"

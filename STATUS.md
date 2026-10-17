@@ -42,10 +42,13 @@ What was checked, what was found and what is left, in plain words. Read [ONBOARD
 | #13 README, STATUS.md and ONBOARDING.md | Docs only. | Nothing |
 | #14 code scanning fixes | Tests, 20 s of each new fuzz target and both image builds passed on the node; the new image published the card and a 2000 MiB slice stopped at 1792 MiB with and without `LD_AUDIT`. The CodeQL, Pinned-Dependencies, Fuzzing and Vulnerabilities alerts closed on `main`. | Nothing |
 | #15 `brand` attribute | ResourceSlice showed `brand: Radeon`; the HAMi-DRA monitor labelled its metrics `devicebrand="Radeon"`. | Instinct GPUs (`brand: Instinct`) |
+| Several GPUs in one claim | Each GPU gets its own `HSA_CU_MASK` entry and `HIP_DEVICE_MEMORY_LIMIT_<index>`, in render node order. `HSA_CU_MASK=0:0-15;1:0-3` limited the card to 16 CUs (209 ms spin kernel instead of 106 ms), so the multi-GPU syntax works with ROCm 7.2.4; the rest is covered by unit tests. | A node with several GPUs |
+| Device health | Kubelet showed the slice's claim as `Healthy` in the pod status, and the `device health reporting is not supported` errors it logged every 5 s stopped. A transient `EBUSY` from `gpu_busy_percent` on this card is not reported as unhealthy. | A GPU that really fails |
+| Image check without dmem | With `--dmem-backend=false`, an `alpine` slice stopped at start with "the image uses musl, which does not load LD_AUDIT", a ROCm Ubuntu slice ran; with dmem on, the `alpine` slice ran, since the kernel caps its memory. | Nothing |
 | End to end with HAMi-DRA | Automated run of HAMi-DRA#172 with `drivers.amd.enabled` on a node labelled `hami.io/amd-mode=dra`, with the published image: 26 of 26 checks for `v0.2.0`, 28 of 28 for `main` at f7d43e9. It covers the published device, the hook, two slices (CUs 0-15 and 16-31, stopped at 1792 MiB with and without `LD_AUDIT`, a spin kernel at 208 ms in each with both busy), a full card, a driver restart, the monitor (0.5 per slice), the uuid and product name annotations, two Ollama pods (`gpumem: 4000`, `gpucores: 50`, 3.9 GiB each, fully on the GPU, about 77 tokens/s alone and 16 each together), the amd-device-plugin chart staying off the node, and a clean cluster at the end. | Nothing |
 
 ## What is not verified, and why
 
 - **Instinct GPUs, hardware partitions and several GPUs per node.** The test node has one RDNA4 card. The upstream partition and VFIO code is unchanged.
-- **Two shared GPUs in one container.** The limits address the GPU as device 0, so a container should get one shared GPU.
-- **A process that drops `LD_AUDIT` on a node without the dmem controller.** The hook is the only memory limit there.
+- **Several shared GPUs in one container on real hardware.** The test node has one GPU. The GPUs of one claim are numbered in render node order; shared GPUs from two claims in one container are not supported.
+- **A process that drops `LD_AUDIT` on a node without the dmem controller.** The hook is the only memory limit there. Images that can not load the hook (musl, glibc older than 2.34) are stopped at start on such a node.

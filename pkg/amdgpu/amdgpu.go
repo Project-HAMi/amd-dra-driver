@@ -22,6 +22,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -431,6 +432,13 @@ func GetTopologyInfo(topoRootParam ...string) map[int]*TopologyInfo {
 		if e != nil {
 			glog.Warningf("Failed to parse simd_per_cu from %s: %v", nodeFile, e)
 			simdPerCU = 1 // Default to 1 to avoid division by zero
+		}
+
+		// Topology values are small counts and indices. Skip a node whose values
+		// do not fit an int32 instead of truncating them.
+		if renderMinor > math.MaxInt32 || simdCount < 0 || simdCount > math.MaxInt32 || simdPerCU < 0 || simdPerCU > math.MaxInt32 {
+			glog.Warningf("Skipping %s: topology values out of range", nodeFile)
+			continue
 		}
 
 		// Calculate CU count

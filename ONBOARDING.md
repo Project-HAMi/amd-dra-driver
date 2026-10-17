@@ -24,7 +24,7 @@ A short guide for someone who opens the repo for the first time. For what was te
 
 ## 4. What the driver publishes
 
-- One device per whole GPU, named `gpu-<card>-<renderD>`, with the attributes `type: amdgpu`, `productName`, `uuid` (from AMD SMI), `deviceID`, `numaNode`, the PCI bus ID and PCIe root.
+- One device per whole GPU, named `gpu-<card>-<renderD>`, with the attributes `type: amdgpu`, `productName`, `brand` (`Radeon` or `Instinct`, from the product name), `uuid` (from AMD SMI), `deviceID`, `numaNode`, the PCI bus ID and PCIe root.
 - Capacity `memory`, `computeUnits` and `simdUnits`. With `GPUSharing`, `computeUnits` is consumed in whole CUs and `simdUnits` defaults to 0.
 - `productName` comes from sysfs, or from the AMD SMI market name where sysfs has none (RDNA cards), with spaces turned into `_`.
 

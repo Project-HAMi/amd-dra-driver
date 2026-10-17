@@ -18,6 +18,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ROCm/k8s-gpu-dra-driver/pkg/consts"
 	"github.com/ROCm/k8s-gpu-dra-driver/pkg/featuregates"
@@ -84,6 +85,9 @@ func (d *AmdGpuInfo) GetDevice() resourceapi.Device {
 	if d.UUID != "" {
 		attributes["uuid"] = resourceapi.DeviceAttribute{StringValue: ptr.To(d.UUID)}
 	}
+	if brand := gpuBrand(d.ProductName); brand != "" {
+		attributes["brand"] = resourceapi.DeviceAttribute{StringValue: ptr.To(brand)}
+	}
 	if d.PartitionProfile != "" {
 		attributes["partitionProfile"] = resourceapi.DeviceAttribute{StringValue: ptr.To(d.PartitionProfile)}
 	}
@@ -106,6 +110,17 @@ func (d *AmdGpuInfo) GetDevice() resourceapi.Device {
 		shareGPUDevice(&device, d.ComputeUnits)
 	}
 	return device
+}
+
+// gpuBrand returns the AMD product line in productName ("Instinct" or
+// "Radeon"), or "" when it names neither.
+func gpuBrand(productName string) string {
+	for _, brand := range []string{"Instinct", "Radeon"} {
+		if strings.Contains(productName, brand) {
+			return brand
+		}
+	}
+	return ""
 }
 
 // shareGPUDevice lets several claims take slices of one whole GPU. A request

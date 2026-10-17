@@ -49,7 +49,7 @@ RUN mkdir /artifacts && \
 # The libc check runs on the host as a CDI hook, so it is built static.
 RUN CGO_ENABLED=0 go build -o /artifacts/vgpu-hook-check ./cmd/vgpu-hook-check
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6@sha256:34880b64c07f28f64d95737f82f891516de9a3b43583f39970f7bf8e4cfa48b7
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8@sha256:c4c285d42941ebb2bd4da878479008e1e4536bb599aad1dbe568f89de9053661
 
 LABEL io.k8s.display-name="AMD GPU Driver for Dynamic Resource Allocation (DRA)"
 LABEL name="AMD GPU Driver for Dynamic Resource Allocation (DRA)"

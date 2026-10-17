@@ -46,6 +46,8 @@ COPY . .
 ENV CGO_ENABLED=1
 RUN mkdir /artifacts && \
     make PREFIX=/artifacts cmds
+# The libc check runs on the host as a CDI hook, so it is built static.
+RUN CGO_ENABLED=0 go build -o /artifacts/vgpu-hook-check ./cmd/vgpu-hook-check
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6@sha256:34880b64c07f28f64d95737f82f891516de9a3b43583f39970f7bf8e4cfa48b7
 
@@ -76,6 +78,7 @@ COPY --from=build /build/third_party/amd_smi/lib/libdrm*.so* /usr/lib64/
 
 COPY --from=build /artifacts/gpu-kubeletplugin /usr/bin/gpu-kubeletplugin
 COPY --from=hook /build/amd-hami-core/build-hip/libamvgpu.so /opt/hami/lib/amd/libamvgpu.so
+COPY --from=build /artifacts/vgpu-hook-check /opt/hami/lib/amd/vgpu-hook-check
 COPY --from=build /artifacts/webhook           /usr/bin/webhook
 
 ENV LD_LIBRARY_PATH=/usr/lib64

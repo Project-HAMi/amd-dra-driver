@@ -85,6 +85,9 @@ type PreparedDevice struct {
 	// ComputeUnits are the CUs given to this share of a whole GPU under the
 	// GPUSharing gate. Persisted so later shares of the GPU avoid them.
 	ComputeUnits []int `json:"computeUnits,omitempty"`
+
+	// slice is this share's slice while the claim is prepared; not persisted.
+	slice *gpuSlice
 }
 
 func (pds PreparedDevices) GetDevices() []*drapbv1.Device {
@@ -121,6 +124,10 @@ func NewDeviceState(config *Config) (*DeviceState, error) {
 
 	if featuregates.Enabled(featuregates.GPUSharing) && config.flags.vgpuHookHostPath != "" {
 		if err := installVGPUHook(config.flags.vgpuHookSource, config.flags.vgpuHookHostPath); err != nil {
+			return nil, err
+		}
+		check := func(path string) string { return filepath.Join(filepath.Dir(path), libcCheckName) }
+		if err := installVGPUHook(check(config.flags.vgpuHookSource), check(config.flags.vgpuHookHostPath)); err != nil {
 			return nil, err
 		}
 	}
@@ -707,11 +714,15 @@ func (s *DeviceState) prepareDevices(claim *resourceapi.ResourceClaim, prepared 
 		}
 	}
 
+	if s.gpuSharing {
+		s.applySliceEdits(preparedDevices)
+	}
 	return preparedDevices, nil
 }
 
-// applyGPUSlice confines a share of a whole GPU to the capacity its allocation
-// result consumed, avoiding the CUs held by other prepared shares of that GPU.
+// applyGPUSlice picks the CUs for a share of a whole GPU, avoiding the CUs held
+// by other prepared shares of that GPU, and caps its VRAM in the kernel. The
+// container edits are written once per claim by applySliceEdits.
 func (s *DeviceState) applyGPUSlice(device *PreparedDevice, result *resourceapi.DeviceRequestAllocationResult, prepared PreparedClaims, current PreparedDevices, consumers []resourceapi.ResourceClaimConsumerReference) error {
 	allocDev := s.allocatable[result.Device]
 	if allocDev == nil || allocDev.AmdGpu == nil {
@@ -732,17 +743,18 @@ func (s *DeviceState) applyGPUSlice(device *PreparedDevice, result *resourceapi.
 	}
 	mark(current)
 
-	edits, cus, err := gpuSliceEdits(allocDev.AmdGpu, result.ConsumedCapacity, busy, s.vgpuHookHostPath)
+	slice, err := placeGPUSlice(allocDev.AmdGpu, result.ConsumedCapacity, busy)
 	if err != nil {
 		return fmt.Errorf("error placing slice of GPU %s: %w", result.Device, err)
 	}
-	device.ComputeUnits = cus
-	if edits != nil {
-		if device.ContainerEdits == nil {
-			device.ContainerEdits = &cdiapi.ContainerEdits{ContainerEdits: &cdispec.ContainerEdits{}}
-		}
-		device.ContainerEdits.Append(&cdiapi.ContainerEdits{ContainerEdits: edits})
-		klog.Infof("GPU %s slice: %v", result.Device, edits.Env)
+	if slice == nil {
+		return nil
+	}
+	device.ComputeUnits = slice.cus
+	device.slice = slice
+	if slice.memMiB > 0 {
+		_, hasRegion := dmemRegion(dmemCgroupRoot, allocDev.AmdGpu.PCIAddress)
+		slice.hookOnly = !s.dmemBackend || !hasRegion
 	}
 	if mem, ok := result.ConsumedCapacity["memory"]; ok && s.dmemBackend && mem.Value() < int64(allocDev.AmdGpu.MemoryBytes) {
 		var podUIDs []string
@@ -754,6 +766,45 @@ func (s *DeviceState) applyGPUSlice(device *PreparedDevice, result *resourceapi.
 		capSliceVRAM(dmemCgroupRoot, allocDev.AmdGpu.PCIAddress, mem.Value(), podUIDs)
 	}
 	return nil
+}
+
+// applySliceEdits writes the slice edits of a claim to each of its whole-GPU
+// devices. The container sees the claim's GPUs in render node order, which is
+// the order the ROCm runtime numbers them in, so that order gives each GPU its
+// index in HSA_CU_MASK and HIP_DEVICE_MEMORY_LIMIT_<index>. GPUs from other
+// claims of the same container are not known here, so a container should get
+// its shared GPUs from one claim.
+func (s *DeviceState) applySliceEdits(devices PreparedDevices) {
+	var gpus PreparedDevices
+	for _, d := range devices {
+		if allocDev := s.allocatable[d.DeviceName]; allocDev != nil && allocDev.AmdGpu != nil {
+			gpus = append(gpus, d)
+		}
+	}
+	sort.SliceStable(gpus, func(i, j int) bool {
+		return s.allocatable[gpus[i].DeviceName].AmdGpu.renderIndex < s.allocatable[gpus[j].DeviceName].AmdGpu.renderIndex
+	})
+	slices := make([]*gpuSlice, len(gpus))
+	for i, d := range gpus {
+		slices[i] = d.slice
+	}
+	edits := sliceEdits(slices, s.vgpuHookHostPath)
+	if edits == nil {
+		return
+	}
+	// The edits cover all GPUs of the claim, so they go on one device only:
+	// the same mount on every device would be a duplicate mount.
+	for _, d := range gpus {
+		if d.slice == nil {
+			continue
+		}
+		if d.ContainerEdits == nil {
+			d.ContainerEdits = &cdiapi.ContainerEdits{ContainerEdits: &cdispec.ContainerEdits{}}
+		}
+		d.ContainerEdits.Append(&cdiapi.ContainerEdits{ContainerEdits: edits})
+		break
+	}
+	klog.Infof("GPU slice edits for %d GPU(s): %v", len(gpus), edits.Env)
 }
 
 func (s *DeviceState) unprepareDevices(claimUID string, devices PreparedDevices) error {

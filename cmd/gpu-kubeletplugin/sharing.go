@@ -33,6 +33,11 @@ import (
 // matches the path HAMi's device plugin uses, so images and docs carry over.
 const vgpuHookContainerPath = "/usr/local/vgpu/libamvgpu.so"
 
+// libcCheckName is the CDI hook (cmd/vgpu-hook-check) that stops a slice from
+// starting when its image can not load the vGPU hook. It ships next to
+// libamvgpu.so in the image and is installed next to it on the node.
+const libcCheckName = "vgpu-hook-check"
+
 // installVGPUHook copies the image-bundled hook to dst, which the driver
 // container sees at the same path as the host. The copy goes through a
 // temporary file and a rename, so a container started meanwhile never maps a
@@ -74,17 +79,22 @@ func installVGPUHook(src, dst string) error {
 	return nil
 }
 
-// gpuSliceEdits returns the container edits that confine one share of a whole
-// GPU to the memory and computeUnits its allocation result consumed, and the
-// CUs it was given. busy holds the CUs already given to other shares of the
-// same GPU.
-//
-// It returns no edits and no CUs for a result without consumed capacity, and no
-// edits for a share that consumed the whole GPU. The edits address the GPU as
-// device 0, which holds while a container gets one shared GPU.
-func gpuSliceEdits(gpu *AmdGpuInfo, consumed map[resourceapi.QualifiedName]resource.Quantity, busy map[int]bool, hookHostPath string) (*cdispec.ContainerEdits, []int, error) {
+// gpuSlice is the share of one whole GPU a claim result consumed.
+type gpuSlice struct {
+	cus     []int // the CUs given to the share
+	maskCUs bool  // fewer CUs than the GPU has, so HSA_CU_MASK must limit them
+	memMiB  int64 // memory limit in MiB, 0 for the whole memory
+	// hookOnly means only the vGPU hook enforces memMiB (no dmem cgroup), so
+	// the image must be able to load it.
+	hookOnly bool
+}
+
+// placeGPUSlice picks the CUs for one share of a whole GPU from the capacity
+// its allocation result consumed. busy holds the CUs already given to other
+// shares of the same GPU. A result without consumed capacity gets no slice.
+func placeGPUSlice(gpu *AmdGpuInfo, consumed map[resourceapi.QualifiedName]resource.Quantity, busy map[int]bool) (*gpuSlice, error) {
 	if consumed == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 	cuCount := int64(gpu.ComputeUnits)
 	if q, ok := consumed["computeUnits"]; ok {
@@ -94,34 +104,60 @@ func gpuSliceEdits(gpu *AmdGpuInfo, consumed map[resourceapi.QualifiedName]resou
 	if q, ok := consumed["memory"]; ok {
 		memBytes = q.Value()
 	}
-
 	cus, err := pickFreeCUs(gpu.ComputeUnits, int(cuCount), busy)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if cuCount >= int64(gpu.ComputeUnits) && memBytes >= int64(gpu.MemoryBytes) {
-		return nil, cus, nil
+	slice := &gpuSlice{cus: cus, maskCUs: cuCount < int64(gpu.ComputeUnits)}
+	if memBytes < int64(gpu.MemoryBytes) {
+		slice.memMiB = max(memBytes>>20, 1)
 	}
+	return slice, nil
+}
 
-	edits := &cdispec.ContainerEdits{}
-	if cuCount < int64(gpu.ComputeUnits) {
-		edits.Env = append(edits.Env, "HSA_CU_MASK=0:"+formatCUs(cus))
+// sliceEdits returns the container edits for the slices of one claim, given
+// in the order the container sees the GPUs (index 0 first). HSA_CU_MASK takes
+// one "<index>:<CUs>" entry per GPU joined by ";", and the hook reads one
+// HIP_DEVICE_MEMORY_LIMIT_<index> per GPU. A nil slice is a whole GPU.
+//
+// The memory cap is enforced by the vGPU hook. Without one there is nothing to
+// read the limit, so none is set rather than one that looks enforced.
+func sliceEdits(slices []*gpuSlice, hookHostPath string) *cdispec.ContainerEdits {
+	var masks, env []string
+	checkLibc := false
+	for i, sl := range slices {
+		if sl == nil {
+			continue
+		}
+		if sl.maskCUs {
+			masks = append(masks, fmt.Sprintf("%d:%s", i, formatCUs(sl.cus)))
+		}
+		if sl.memMiB > 0 && hookHostPath != "" {
+			env = append(env, fmt.Sprintf("HIP_DEVICE_MEMORY_LIMIT_%d=%dm", i, sl.memMiB))
+			checkLibc = checkLibc || sl.hookOnly
+		}
 	}
-	// The memory cap is enforced by the vGPU hook. Without one there is nothing
-	// to read the limit, so none is set rather than one that looks enforced.
-	if memBytes < int64(gpu.MemoryBytes) && hookHostPath != "" {
-		mib := max(memBytes>>20, 1)
-		edits.Env = append(edits.Env,
-			fmt.Sprintf("HIP_DEVICE_MEMORY_LIMIT_0=%dm", mib),
-			"LD_AUDIT="+vgpuHookContainerPath,
-		)
+	edits := &cdispec.ContainerEdits{}
+	if len(masks) > 0 {
+		edits.Env = append(edits.Env, "HSA_CU_MASK="+strings.Join(masks, ";"))
+	}
+	if len(env) > 0 {
+		edits.Env = append(edits.Env, env...)
+		edits.Env = append(edits.Env, "LD_AUDIT="+vgpuHookContainerPath)
 		edits.Mounts = append(edits.Mounts, &cdispec.Mount{
 			HostPath:      hookHostPath,
 			ContainerPath: vgpuHookContainerPath,
 			Options:       []string{"ro", "nosuid", "nodev", "bind"},
 		})
 	}
-	return edits, cus, nil
+	if checkLibc {
+		check := filepath.Join(filepath.Dir(hookHostPath), libcCheckName)
+		edits.Hooks = append(edits.Hooks, &cdispec.Hook{HookName: "createContainer", Path: check, Args: []string{libcCheckName}})
+	}
+	if len(edits.Env) == 0 {
+		return nil
+	}
+	return edits
 }
 
 // pickFreeCUs returns the n lowest CU indices below total that are not busy.

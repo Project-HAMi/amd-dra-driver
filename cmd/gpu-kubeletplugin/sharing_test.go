@@ -41,43 +41,77 @@ func consumed(mem string, cus int64) map[resourceapi.QualifiedName]resource.Quan
 	}
 }
 
-func TestGPUSliceEdits(t *testing.T) {
-	edits, cus, err := gpuSliceEdits(rx9060xt(), consumed("2000Mi", 16), nil, "/usr/local/vgpu/libamvgpu.so")
+func TestSliceEdits(t *testing.T) {
+	sl, err := placeGPUSlice(rx9060xt(), consumed("2000Mi", 16), nil)
 	require.NoError(t, err)
-	assert.Len(t, cus, 16)
+	assert.Len(t, sl.cus, 16)
+	edits := sliceEdits([]*gpuSlice{sl}, "/usr/local/vgpu/libamvgpu.so")
 	assert.Equal(t, []string{"HSA_CU_MASK=0:0-15", "HIP_DEVICE_MEMORY_LIMIT_0=2000m", "LD_AUDIT=" + vgpuHookContainerPath}, edits.Env)
 	require.Len(t, edits.Mounts, 1)
 	assert.Equal(t, "/usr/local/vgpu/libamvgpu.so", edits.Mounts[0].HostPath)
 	assert.Equal(t, vgpuHookContainerPath, edits.Mounts[0].ContainerPath)
 }
 
-func TestGPUSliceEditsSkipsBusyCUs(t *testing.T) {
+func TestSliceEditsSkipsBusyCUs(t *testing.T) {
 	busy := map[int]bool{}
 	for cu := 0; cu < 16; cu++ {
 		busy[cu] = true
 	}
-	edits, cus, err := gpuSliceEdits(rx9060xt(), consumed("2000Mi", 16), busy, "")
+	sl, err := placeGPUSlice(rx9060xt(), consumed("2000Mi", 16), busy)
 	require.NoError(t, err)
-	assert.Equal(t, 16, cus[0])
+	assert.Equal(t, 16, sl.cus[0])
 	// No hook configured: the CU mask is set, the memory limit is not.
+	edits := sliceEdits([]*gpuSlice{sl}, "")
 	assert.Equal(t, []string{"HSA_CU_MASK=0:16-31"}, edits.Env)
 	assert.Empty(t, edits.Mounts)
 
-	_, _, err = gpuSliceEdits(rx9060xt(), consumed("2000Mi", 17), busy, "")
+	_, err = placeGPUSlice(rx9060xt(), consumed("2000Mi", 17), busy)
 	assert.ErrorContains(t, err, "need 17 free CUs, only 16 of 32 are free")
 }
 
-func TestGPUSliceEditsWholeGPU(t *testing.T) {
-	edits, cus, err := gpuSliceEdits(rx9060xt(), consumed("16304Mi", 32), nil, "/hook")
+func TestSliceEditsWholeGPU(t *testing.T) {
+	sl, err := placeGPUSlice(rx9060xt(), consumed("16304Mi", 32), nil)
 	require.NoError(t, err)
-	assert.Nil(t, edits)
-	assert.Len(t, cus, 32)
+	assert.Len(t, sl.cus, 32)
+	assert.Nil(t, sliceEdits([]*gpuSlice{sl}, "/hook"))
 
 	// A result without consumed capacity (gate off, or an older scheduler) is left alone.
-	edits, cus, err = gpuSliceEdits(rx9060xt(), nil, nil, "/hook")
+	sl, err = placeGPUSlice(rx9060xt(), nil, nil)
 	require.NoError(t, err)
-	assert.Nil(t, edits)
-	assert.Nil(t, cus)
+	assert.Nil(t, sl)
+}
+
+func TestSliceEditsSeveralGPUs(t *testing.T) {
+	half, err := placeGPUSlice(rx9060xt(), consumed("2000Mi", 16), nil)
+	require.NoError(t, err)
+	quarter, err := placeGPUSlice(rx9060xt(), consumed("4000Mi", 8), map[int]bool{0: true})
+	require.NoError(t, err)
+	// GPU 1 is whole, so it gets no mask and no limit but keeps its index.
+	edits := sliceEdits([]*gpuSlice{half, nil, quarter}, "/hook")
+	assert.Equal(t, []string{
+		"HSA_CU_MASK=0:0-15;2:1-8",
+		"HIP_DEVICE_MEMORY_LIMIT_0=2000m",
+		"HIP_DEVICE_MEMORY_LIMIT_2=4000m",
+		"LD_AUDIT=" + vgpuHookContainerPath,
+	}, edits.Env)
+	assert.Len(t, edits.Mounts, 1)
+	assert.Empty(t, edits.Hooks, "dmem caps these slices, so any image may run")
+}
+
+func TestSliceEditsCheckLibcWithoutDmem(t *testing.T) {
+	sl, err := placeGPUSlice(rx9060xt(), consumed("2000Mi", 16), nil)
+	require.NoError(t, err)
+	sl.hookOnly = true
+	edits := sliceEdits([]*gpuSlice{sl}, "/usr/local/vgpu/amd-dra/libamvgpu.so")
+	require.Len(t, edits.Hooks, 1)
+	assert.Equal(t, "createContainer", edits.Hooks[0].HookName)
+	assert.Equal(t, "/usr/local/vgpu/amd-dra/vgpu-hook-check", edits.Hooks[0].Path)
+
+	// Without a memory limit there is nothing the hook must enforce.
+	cus, err := placeGPUSlice(rx9060xt(), consumed("16304Mi", 16), nil)
+	require.NoError(t, err)
+	cus.hookOnly = true
+	assert.Empty(t, sliceEdits([]*gpuSlice{cus}, "/hook").Hooks)
 }
 
 func TestFormatCUs(t *testing.T) {
@@ -114,7 +148,41 @@ func TestApplyGPUSliceAvoidsPreparedShares(t *testing.T) {
 
 	require.NoError(t, state.applyGPUSlice(device, result, prepared, nil, nil))
 	assert.Equal(t, 16, device.ComputeUnits[0])
+	state.applySliceEdits(PreparedDevices{device})
 	assert.Contains(t, device.ContainerEdits.Env, "HSA_CU_MASK=0:16-31")
+}
+
+func TestApplySliceEditsOrdersByRenderNode(t *testing.T) {
+	gpu := func(render int) *AmdGpuInfo {
+		g := rx9060xt()
+		g.renderIndex = render
+		return g
+	}
+	state := &DeviceState{
+		allocatable: AllocatableDevices{
+			"gpu-2-130": {AmdGpu: gpu(130)},
+			"gpu-1-129": {AmdGpu: gpu(129)},
+		},
+		vgpuHookHostPath: "/hook",
+	}
+	// The claim lists the second card first; the container numbers them by render node.
+	second := &PreparedDevice{Device: drapbv1.Device{DeviceName: "gpu-2-130"}}
+	first := &PreparedDevice{Device: drapbv1.Device{DeviceName: "gpu-1-129"}}
+	for _, d := range []*PreparedDevice{second, first} {
+		result := &resourceapi.DeviceRequestAllocationResult{Device: d.DeviceName, ConsumedCapacity: consumed("2000Mi", 16)}
+		require.NoError(t, state.applyGPUSlice(d, result, nil, nil, nil))
+	}
+	second.slice.memMiB = 3000
+	state.applySliceEdits(PreparedDevices{second, first})
+
+	require.NotNil(t, first.ContainerEdits)
+	assert.Nil(t, second.ContainerEdits, "the edits go on one device only")
+	assert.Equal(t, []string{
+		"HSA_CU_MASK=0:0-15;1:0-15",
+		"HIP_DEVICE_MEMORY_LIMIT_0=2000m",
+		"HIP_DEVICE_MEMORY_LIMIT_1=3000m",
+		"LD_AUDIT=" + vgpuHookContainerPath,
+	}, first.ContainerEdits.Env)
 }
 
 func TestInstallVGPUHook(t *testing.T) {

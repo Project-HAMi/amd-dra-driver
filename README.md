@@ -18,12 +18,17 @@ It is based on [ROCm/k8s-gpu-dra-driver](https://github.com/ROCm/k8s-gpu-dra-dri
 
 - One shared GPU per container: the limits address the GPU as device 0.
 - A process that re-execs itself without `LD_AUDIT` has no memory limit. There is no kernel-level (dmem) cap yet.
-- Do not run it on a node where the HAMi AMD device plugin serves the same GPU. The HAMi scheduler does not see DRA claims: with two DRA slices on CUs 0-15 and 16-31, a device plugin pod was still given CUs 0-15. Keep `--vgpu-hook-host-path` away from the device plugin's `/usr/local/vgpu/libamvgpu.so`.
+- A node runs either this driver or the HAMi AMD device plugin, chosen with the label `hami.io/amd-mode=dra`. The HAMi scheduler does not see DRA claims: with two DRA slices on CUs 0-15 and 16-31, a device plugin pod on the same node was still given CUs 0-15. The charts of HAMi-DRA and amd-device-plugin follow the label. Keep `--vgpu-hook-host-path` away from the device plugin's `/usr/local/vgpu/libamvgpu.so`.
+- HAMi-DRA converts `amd.com/gpu` pods in every namespace it watches, so in those namespaces AMD pods only land on DRA nodes.
 - The driver publishes no `uuid` attribute, and an empty `productName` on cards without one in sysfs, so HAMi-DRA's `amd.com/use-gpu-uuid` and `amd.com/use-gputype` do not match yet.
 
 ## Install
 
-The cluster needs DRA with the `DRAConsumableCapacity` feature gate, and CDI enabled in the container runtime. The driver runs privileged, so its namespace must allow privileged pods.
+The cluster needs DRA with the `DRAConsumableCapacity` feature gate, and CDI enabled in the container runtime. The driver runs privileged, so its namespace must allow privileged pods. Hand a node to the driver with:
+
+```bash
+kubectl label node <node> hami.io/amd-mode=dra
+```
 
 With HAMi-DRA, `drivers.amd.enabled` installs this driver and converts `amd.com/gpu`, `amd.com/gpumem` and `amd.com/gpucores` into claims. This chart option is in [HAMi-DRA#172](https://github.com/Project-HAMi/HAMi-DRA/pull/172) and not released yet:
 
@@ -43,6 +48,7 @@ On its own, with this repository's chart:
 helm install amd-dra-driver ./helm-charts-k8s -n kube-amd-gpu --create-namespace \
   --set image.repository=ghcr.io/project-hami/amd-dra-driver \
   --set image.tag=main \
+  --set kubeletPlugin.nodeSelector."hami\.io/amd-mode"=dra \
   --set featureGates.GPUSharing=true \
   --set kubeletPlugin.vgpuHookHostPath=/usr/local/vgpu/amd-dra/libamvgpu.so
 ```

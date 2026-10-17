@@ -108,6 +108,7 @@ type DeviceState struct {
 	nodeName             string  // this node's name, matched against allocation results' Pool
 	gpuSharing           bool    // whether whole GPUs are sliced (GPUSharing gate)
 	vgpuHookHostPath     string  // host path of the vGPU hook that enforces memory slices
+	dmemBackend          bool    // whether memory slices are also capped by the dmem cgroup
 }
 
 func NewDeviceState(config *Config) (*DeviceState, error) {
@@ -163,6 +164,7 @@ func NewDeviceState(config *Config) (*DeviceState, error) {
 		nodeName:           config.flags.nodeName,
 		gpuSharing:         featuregates.Enabled(featuregates.GPUSharing),
 		vgpuHookHostPath:   config.flags.vgpuHookHostPath,
+		dmemBackend:        config.flags.dmemBackend,
 	}
 
 	// Set up partition state for synthetic-partition mode
@@ -694,7 +696,7 @@ func (s *DeviceState) prepareDevices(claim *resourceapi.ResourceClaim, prepared 
 			}
 
 			if s.gpuSharing {
-				if err := s.applyGPUSlice(device, result, prepared, preparedDevices); err != nil {
+				if err := s.applyGPUSlice(device, result, prepared, preparedDevices, claim.Status.ReservedFor); err != nil {
 					return nil, err
 				}
 			}
@@ -710,7 +712,7 @@ func (s *DeviceState) prepareDevices(claim *resourceapi.ResourceClaim, prepared 
 
 // applyGPUSlice confines a share of a whole GPU to the capacity its allocation
 // result consumed, avoiding the CUs held by other prepared shares of that GPU.
-func (s *DeviceState) applyGPUSlice(device *PreparedDevice, result *resourceapi.DeviceRequestAllocationResult, prepared PreparedClaims, current PreparedDevices) error {
+func (s *DeviceState) applyGPUSlice(device *PreparedDevice, result *resourceapi.DeviceRequestAllocationResult, prepared PreparedClaims, current PreparedDevices, consumers []resourceapi.ResourceClaimConsumerReference) error {
 	allocDev := s.allocatable[result.Device]
 	if allocDev == nil || allocDev.AmdGpu == nil {
 		return nil
@@ -741,6 +743,15 @@ func (s *DeviceState) applyGPUSlice(device *PreparedDevice, result *resourceapi.
 		}
 		device.ContainerEdits.Append(&cdiapi.ContainerEdits{ContainerEdits: edits})
 		klog.Infof("GPU %s slice: %v", result.Device, edits.Env)
+	}
+	if mem, ok := result.ConsumedCapacity["memory"]; ok && s.dmemBackend && mem.Value() < int64(allocDev.AmdGpu.MemoryBytes) {
+		var podUIDs []string
+		for _, c := range consumers {
+			if c.Resource == "pods" {
+				podUIDs = append(podUIDs, string(c.UID))
+			}
+		}
+		capSliceVRAM(dmemCgroupRoot, allocDev.AmdGpu.PCIAddress, mem.Value(), podUIDs)
 	}
 	return nil
 }

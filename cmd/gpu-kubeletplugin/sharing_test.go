@@ -112,7 +112,7 @@ func TestApplyGPUSliceAvoidsPreparedShares(t *testing.T) {
 	device := &PreparedDevice{Device: drapbv1.Device{DeviceName: "gpu-1-129"}}
 	result := &resourceapi.DeviceRequestAllocationResult{Device: "gpu-1-129", ConsumedCapacity: consumed("2000Mi", 16)}
 
-	require.NoError(t, state.applyGPUSlice(device, result, prepared, nil))
+	require.NoError(t, state.applyGPUSlice(device, result, prepared, nil, nil))
 	assert.Equal(t, 16, device.ComputeUnits[0])
 	assert.Contains(t, device.ContainerEdits.Env, "HSA_CU_MASK=0:16-31")
 }

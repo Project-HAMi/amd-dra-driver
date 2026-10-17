@@ -1,105 +1,97 @@
-# AMD GPU Kubernetes Driver for Dynamic Resource Allocation (DRA)
+# HAMi AMD DRA Driver
 
-> **HAMi fork.** This repository is based on [ROCm/k8s-gpu-dra-driver](https://github.com/ROCm/k8s-gpu-dra-driver) and adds the `GPUSharing` feature gate, which lets several ResourceClaims share one whole GPU and enforces each slice with `HSA_CU_MASK` and HAMi's `libamvgpu.so` hook ([cli-options](docs/cli-options.md#driver-feature-gates)). It is the driver behind the `amd` vendor of [HAMi-DRA](https://github.com/Project-HAMi/HAMi-DRA). The sharing change is also proposed upstream in ROCm/k8s-gpu-dra-driver#129, and upstream changes are merged in from ROCm.
+[![Image](https://github.com/Project-HAMi/amd-dra-driver/actions/workflows/hami-image.yaml/badge.svg)](https://github.com/Project-HAMi/amd-dra-driver/actions/workflows/hami-image.yaml)
+[![License](https://img.shields.io/github/license/Project-HAMi/amd-dra-driver)](LICENSE)
 
-This repository implements an AMD GPU resource driver for Kubernetes' Dynamic
-Resource Allocation (DRA) feature. The driver exposes device classes and
-implements allocation and lifecycle behavior for GPU resources on nodes.
+A Kubernetes Dynamic Resource Allocation (DRA) driver that lets [HAMi](https://github.com/Project-HAMi/HAMi) share AMD GPUs between pods. Several ResourceClaims can each take a slice of one GPU, and each pod is limited to its share of the GPU's compute units and memory. It is the driver behind the `amd` vendor of [HAMi-DRA](https://github.com/Project-HAMi/HAMi-DRA).
 
-## DRA Concepts
+It is based on [ROCm/k8s-gpu-dra-driver](https://github.com/ROCm/k8s-gpu-dra-driver) and keeps its device discovery, partitions and VFIO support. This repository adds the `GPUSharing` feature gate and HAMi's memory hook from [amd-hami-core](https://github.com/Project-HAMi/amd-hami-core). The device plugin path for the same sharing is [amd-device-plugin](https://github.com/Project-HAMi/amd-device-plugin).
 
-- Device class: a logical grouping of devices exposed by the driver (for
-  example `gpu.amd.com`). Device classes are the API surface workloads request
-  from Kubernetes via ResourceClaims.
-- ResourceClaim / ResourceClass: the Kubernetes API objects workloads use to
-  request DRA-managed resources. The driver receives allocation requests and
-  returns device identifiers or access information.
-- Allocation lifecycle: the driver can perform setup and teardown when a
-  resource is assigned or released. This includes device programming, security
-  setup, and publishing device information to the consumer pod's environment.
+## What it does
 
-DRA lets device drivers provide more advanced placement and sharing modes than
-traditional device plugins. For expanded background see the upstream docs:
-https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/
+- With `GPUSharing`, publishes each whole GPU with `allowMultipleAllocations` and consumable `memory` and `computeUnits`. A claim that asks for no capacity still takes the whole GPU.
+- Gives each slice a free set of CUs through `HSA_CU_MASK`. The CUs are kept in the driver checkpoint, so later slices and a driver restart avoid them.
+- Limits each slice's memory with `HIP_DEVICE_MEMORY_LIMIT_0`, enforced by `libamvgpu.so`. The hook is built into the image and copied to `--vgpu-hook-host-path` on the node at startup.
+- Without `GPUSharing` it behaves like the upstream driver.
 
-## Requirements
+**Known gaps:**
 
-- Kubernetes 1.32 or newer. Dynamic Resource Allocation (DRA) entered beta in
-  Kubernetes 1.32.
-- Ensure the DRA APIs are enabled in your cluster version. The examples in this
-  repo currently use `resource.k8s.io/v1` which was introduced in Kubernetes 1.34.
-  If your cluster only provides `v1beta1`/`v1beta2` (introduced in Kubernetes 1.32/1.33
-  respectively), adjust the `apiVersion` accordingly or use a newer Kubernetes release.
+- One shared GPU per container: the limits address the GPU as device 0.
+- A process that re-execs itself without `LD_AUDIT` has no memory limit. There is no kernel-level (dmem) cap yet.
+- Do not run it on a node where the HAMi AMD device plugin serves the same GPU. The HAMi scheduler does not see DRA claims: with two DRA slices on CUs 0-15 and 16-31, a device plugin pod was still given CUs 0-15. Keep `--vgpu-hook-host-path` away from the device plugin's `/usr/local/vgpu/libamvgpu.so`.
+- The driver publishes no `uuid` attribute, and an empty `productName` on cards without one in sysfs, so HAMi-DRA's `amd.com/use-gpu-uuid` and `amd.com/use-gputype` do not match yet.
 
-## Project layout
+## Install
 
-- `cmd/` — command binaries (kubelet plugin, webhook, etc.)
-- `pkg/` — driver implementation and platform helpers (AMDGPU interactions)
-- `deployments/` — manifests and container build Makefile
-- `helm-chart-k8s/` — Helm chart source used for packaging
-- `demo/` — demo and helper scripts for local testing with `kind` (browse: https://github.com/ROCm/k8s-gpu-dra-driver/tree/main/demo)
-- `scripts/` — project-level build and release helpers
-- `docs/` — documentation (installation, developer guides) (browse: https://github.com/ROCm/k8s-gpu-dra-driver/tree/main/docs)
+The cluster needs DRA with the `DRAConsumableCapacity` feature gate, and CDI enabled in the container runtime. The driver runs privileged, so its namespace must allow privileged pods.
 
-## Quick Start
-
-Install the DRA driver from the published Helm repository:
+With HAMi-DRA, `drivers.amd.enabled` installs this driver and converts `amd.com/gpu`, `amd.com/gpumem` and `amd.com/gpucores` into claims. This chart option is in [HAMi-DRA#172](https://github.com/Project-HAMi/HAMi-DRA/pull/172) and not released yet:
 
 ```bash
-# Install Helm
-curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
-chmod 700 get_helm.sh
-./get_helm.sh
-
-# Add the Helm repository
-helm repo add rocm-k8s-gpu-dra-driver https://rocm.github.io/k8s-gpu-dra-driver
-helm repo update
-
-# Install the DRA driver
-helm install k8s-gpu-dra-driver rocm-k8s-gpu-dra-driver/k8s-gpu-dra-driver \
-  --namespace kube-amd-gpu \
-  --create-namespace
+helm install hami-dra charts/hami-dra -n hami-dra \
+  --set "deviceVendors={amd}" \
+  --set amdReferenceComputeUnits=32 \
+  --set drivers.nvidia.enabled=false \
+  --set drivers.amd.enabled=true
 ```
 
-## Getting started
+`amdReferenceComputeUnits` is the CU count of one GPU, used to turn `amd.com/gpucores` percent into CUs.
 
-Read the Installation & Developer Guide for full, step-by-step installation and developer
-workflows (https://github.com/ROCm/k8s-gpu-dra-driver/blob/main/docs/installation.md). Key quick actions:
-
-- Build the driver image (containerized build):
+On its own, with this repository's chart:
 
 ```bash
-make build
+helm install amd-dra-driver ./helm-charts-k8s -n kube-amd-gpu --create-namespace \
+  --set image.repository=ghcr.io/project-hami/amd-dra-driver \
+  --set image.tag=main \
+  --set featureGates.GPUSharing=true \
+  --set kubeletPlugin.vgpuHookHostPath=/usr/local/vgpu/amd-dra/libamvgpu.so
 ```
 
-- Package the Helm chart (chart tarball placed in `helm-charts-k8s/`):
+A claim for a slice of one GPU:
+
+```yaml
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: amd-slice
+spec:
+  spec:
+    devices:
+      requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.amd.com
+          capacity:
+            requests:
+              memory: 2000Mi
+              computeUnits: "16"
+```
+
+Flags, feature gates and the upstream install guide are in [docs/cli-options.md](docs/cli-options.md) and [docs/installation.md](docs/installation.md).
+
+## Build
 
 ```bash
-make helm
+git clone --recurse-submodules https://github.com/Project-HAMi/amd-dra-driver.git
+cd amd-dra-driver
+docker build -f deployments/container/Dockerfile \
+  --build-arg GOLANG_VERSION=$(awk '/^go /{print $2}' go.mod) \
+  -t amd-dra-driver .
 ```
 
-- Create a local `kind` cluster and load the driver image (demo helpers):
+## Test
 
 ```bash
-./demo/create-cluster.sh
-
-# When finished
-./demo/delete-cluster.sh
+LD_LIBRARY_PATH=$PWD/third_party/amd_smi/lib go test ./cmd/... ./pkg/...
 ```
 
-## Where to find more
+Run as a non-root user: `TestBindToDriver/bind_failure_clears_driver_override` from upstream fails as root.
 
-- Installation & Developer Guide: https://github.com/ROCm/k8s-gpu-dra-driver/blob/main/docs/installation.md
-- Demo scripts: https://github.com/ROCm/k8s-gpu-dra-driver/tree/main/demo
-- Build logic: https://github.com/ROCm/k8s-gpu-dra-driver/blob/main/Makefile and https://github.com/ROCm/k8s-gpu-dra-driver/blob/main/deployments/container/Makefile
-- Examples: https://github.com/ROCm/k8s-gpu-dra-driver/tree/main/example
- - Demo & Examples Guide: https://github.com/ROCm/k8s-gpu-dra-driver/blob/main/docs/demo.md
-- Troubleshooting & Known Limitations: https://github.com/ROCm/k8s-gpu-dra-driver/blob/main/docs/troubleshooting.md
+## Verified on
 
-## Contributing
+- AMD Radeon RX 9060 XT (gfx1200, 16 GiB, 32 CUs), one GPU, RKE2 v1.36.3, kernel 7.0, ROCm 7.2.4 images, with HAMi-DRA#172. Two `amd.com/gpumem: 2000` and `amd.com/gpucores: 50` pods ran on CUs 0-15 and 16-31, each was stopped at 2000 MiB, a third waited until one was deleted, and slices kept their CUs across a driver restart. Two Ollama pods (`llama3.2:3b`, `amd.com/gpumem: 4000`, `amd.com/gpucores: 50`) each saw a 3.9 GiB GPU and ran fully on it, at 48 to 75 tokens/s alone and 24 to 36 each when both ran at once.
+- Not run yet: Instinct GPUs, partitioned GPUs, several GPUs per node.
 
-See the Contributing section at the end of the Installation & Developer Guide:
+## Upstream
 
-- https://github.com/ROCm/k8s-gpu-dra-driver/blob/main/docs/installation.md#contributing
-
----
+Changes from [ROCm/k8s-gpu-dra-driver](https://github.com/ROCm/k8s-gpu-dra-driver) `develop` are merged in from the `upstream` remote. The driver name `gpu.amd.com` and the Go module path are unchanged to keep those merges simple, and the upstream workflows stay in place but only run in the ROCm repository.

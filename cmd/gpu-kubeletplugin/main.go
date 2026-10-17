@@ -68,6 +68,7 @@ type Flags struct {
 	healthcheckPort               int
 	vgpuHookHostPath              string
 	vgpuHookSource                string
+	dmemBackend                   bool
 }
 
 type Config struct {
@@ -140,6 +141,13 @@ func newApp() *cli.App {
 			Value:       "/opt/hami/lib/amd/libamvgpu.so",
 			Destination: &flags.vgpuHookSource,
 			EnvVars:     []string{"VGPU_HOOK_SOURCE"},
+		},
+		&cli.BoolFlag{
+			Name:        "dmem-backend",
+			Usage:       "Under the GPUSharing gate, also cap each memory slice in the kernel with the dmem cgroup controller, where the node has it (cgroup v2, systemd cgroup driver).",
+			Value:       true,
+			Destination: &flags.dmemBackend,
+			EnvVars:     []string{"DMEM_BACKEND"},
 		},
 	}
 	cliFlags = append(cliFlags, flags.kubeClientConfig.Flags()...)

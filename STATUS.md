@@ -4,7 +4,7 @@ What was checked, what was found and what is left, in plain words. Read [ONBOARD
 
 ## In one minute
 
-- Every change this repository adds to ROCm/k8s-gpu-dra-driver was run on a real AMD GPU, together with HAMi-DRA ([#172](https://github.com/Project-HAMi/HAMi-DRA/pull/172), not merged yet).
+- Every change this repository adds to ROCm/k8s-gpu-dra-driver was run on a real AMD GPU, together with HAMi-DRA ([#172](https://github.com/Project-HAMi/HAMi-DRA/pull/172), merged, not released yet).
 - Two pods can share one GPU: each gets its own CUs and its own memory limit, enforced by the hook and by the kernel.
 - Each release passed a full end-to-end run on the card: 26 checks for `v0.2.0`, 28 for `v0.3.0` (adds the `brand` attribute) and 40 for `v0.4.0` (adds device health, the image check and the HAMi-DRA memory percentage, type matching and opt-out label).
 - What is left: the checks that need hardware this machine did not have (end of this file).

@@ -19,7 +19,7 @@ A short guide for someone who opens the repo for the first time. For what was te
 
 ## 3. Resources a pod can ask for
 
-- Through HAMi-DRA: `amd.com/gpu` (number of GPUs), `amd.com/gpumem` (MiB), `amd.com/gpumem-percentage` (percent of each GPU's memory), `amd.com/gpucores` (percent of the CUs), and the annotations `amd.com/use-gpu-uuid`, `amd.com/nouse-gpu-uuid`, `amd.com/use-gputype` and `amd.com/nouse-gputype`. The type annotations match any part of the name, in any case, as in HAMi. A pod labelled `hami.io/skip-dra: "true"` is not converted and stays on the device plugin. The percentage, the type matching and the label come with HAMi-DRA#172 and #182, not merged yet.
+- Through HAMi-DRA: `amd.com/gpu` (number of GPUs), `amd.com/gpumem` (MiB), `amd.com/gpumem-percentage` (percent of each GPU's memory), `amd.com/gpucores` (percent of the CUs), and the annotations `amd.com/use-gpu-uuid`, `amd.com/nouse-gpu-uuid`, `amd.com/use-gputype` and `amd.com/nouse-gputype`. The type annotations match any part of the name, in any case, as in HAMi. A pod labelled `hami.io/skip-dra: "true"` is not converted and stays on the device plugin. The percentage, the type matching and the label come with HAMi-DRA#172 and #182, merged, not released yet.
 - Several GPUs in one request are limited each on its own: one `HSA_CU_MASK` entry and one `HIP_DEVICE_MEMORY_LIMIT_<index>` per GPU. A container should get its shared GPUs from one claim.
 - Directly, a ResourceClaim on `gpu.amd.com` with `capacity.requests.memory` and `capacity.requests.computeUnits`. A claim without capacity takes the whole GPU.
 

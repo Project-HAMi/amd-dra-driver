@@ -4,6 +4,10 @@ Changes of this repository on top of [ROCm/k8s-gpu-dra-driver](https://github.co
 
 ## Unreleased
 
+### Changed
+
+- The image is built with Go 1.27.3 (#22) and the current UBI 9 minimal digest (#24), and amd-hami-core is at a newer main (#23).
+
 ### Fixed
 
 - The Security Insights file declares secret scanning with the tool type that OpenSSF baseline scanners read (#20).

@@ -28,7 +28,7 @@ A short guide for someone who opens the repo for the first time. For what was te
 - One device per whole GPU, named `gpu-<card>-<renderD>`, with the attributes `type: amdgpu`, `productName`, `brand` (`Radeon` or `Instinct`, from the product name), `uuid` (from AMD SMI), `deviceID`, `numaNode`, the PCI bus ID and PCIe root.
 - Capacity `memory`, `computeUnits` and `simdUnits`. With `GPUSharing`, `computeUnits` is consumed in whole CUs and `simdUnits` defaults to 0.
 - The health of each GPU, reported to kubelet every 10 s; kubelet shows it in the pod status under `allocatedResourcesStatus`.
-- `productName` comes from sysfs, or from the AMD SMI market name where sysfs has none (RDNA cards), with spaces turned into `_`.
+- `productName` comes from sysfs, or from the AMD SMI market name where sysfs has none (RDNA cards), with spaces turned into `_`. Where that name is empty or the generic `AMD Radeon Graphics` (AMD SMI says so for the MI325X), the PCI device ID names the Instinct part (`pkg/amdgpu`, `InstinctProductName`), so `brand` is `Instinct` and `amd.com/use-gputype: MI325X` matches.
 
 ## 5. amd-hami-core and `libamvgpu.so`
 
@@ -39,13 +39,13 @@ A short guide for someone who opens the repo for the first time. For what was te
 
 ## 6. Install and main settings
 
-The cluster needs DRA with the `DRAConsumableCapacity` feature gate and CDI in the container runtime. The driver runs privileged, so its namespace must allow privileged pods. Hand a node to the driver with:
+The cluster needs DRA with the `DRAConsumableCapacity` feature gate and CDI in the container runtime. The node needs the `amdgpu` driver bound to the GPU, not only loaded: check `lspci -k` and `/dev/kfd`. An Instinct MI325X needed kernel 6.14 with `amdgpu-dkms` 6.16.13, because the in-tree driver of kernels 6.8 and 7.0 did not bind to it, and that DKMS version does not build on 6.17 and 7.0. The dmem memory cap needs kernel 6.14 or newer. The driver runs privileged, so its namespace must allow privileged pods. Hand a node to the driver with:
 
 ```bash
 kubectl label node <node> hami.io/amd-mode=dra
 ```
 
-With HAMi-DRA (the `drivers.amd` option is in [HAMi-DRA#172](https://github.com/Project-HAMi/HAMi-DRA/pull/172) and not released yet):
+With HAMi-DRA (the `drivers.amd` option is in [HAMi-DRA#172](https://github.com/Project-HAMi/HAMi-DRA/pull/172) and not released yet; until it is, set `webhook.image.tag=latest`, since `v0.2.3` does not know AMD):
 
 ```bash
 helm install hami-dra charts/hami-dra -n hami-dra \

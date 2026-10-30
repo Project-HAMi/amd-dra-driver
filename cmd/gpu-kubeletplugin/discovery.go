@@ -414,5 +414,6 @@ func fillGPUIdentities(allocatable AllocatableDevices) {
 		if d.AmdGpu.ProductName == "" {
 			d.AmdGpu.ProductName = amdgpu.ProductNameAttribute(id.MarketName)
 		}
+		d.AmdGpu.ProductName = amdgpu.InstinctProductName(d.AmdGpu.DeviceID, d.AmdGpu.ProductName)
 	}
 }

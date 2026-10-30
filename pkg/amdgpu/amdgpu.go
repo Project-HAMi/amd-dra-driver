@@ -75,6 +75,30 @@ func ProductNameAttribute(raw string) string {
 	return strings.NewReplacer(" ", "_", "(", "", ")", "").Replace(strings.TrimSpace(raw))
 }
 
+// instinctNames names the Instinct parts by PCI device ID, from libdrm's
+// amdgpu.ids. 0x74b9 is the MI325X virtual function, which libdrm does not list.
+var instinctNames = map[string]string{
+	"0x74a0": "AMD Instinct MI300A",
+	"0x74a1": "AMD Instinct MI300X",
+	"0x74a5": "AMD Instinct MI325X",
+	"0x74a9": "AMD Instinct MI300X HF",
+	"0x74b5": "AMD Instinct MI300X VF",
+	"0x74b6": "AMD Instinct MI308X",
+	"0x74b9": "AMD Instinct MI325X",
+	"0x74bd": "AMD Instinct MI300X HF",
+}
+
+// InstinctProductName returns the product name attribute for an Instinct device
+// ID when current is empty or generic. AMD SMI reports "AMD Radeon Graphics"
+// for some Instinct cards (MI325X); it returns current otherwise.
+func InstinctProductName(deviceID, current string) string {
+	name, ok := instinctNames[strings.ToLower(deviceID)]
+	if !ok || (current != "" && !strings.Contains(current, "Radeon_Graphics")) {
+		return current
+	}
+	return ProductNameAttribute(name)
+}
+
 // GetAMDGPUs return a map of AMD GPU on a node identified by the part of the pci address
 func GetAMDGPUs() map[string]map[string]interface{} {
 	if _, err := os.Stat("/sys/module/amdgpu/drivers/"); err != nil {

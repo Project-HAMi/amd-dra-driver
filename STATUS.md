@@ -7,7 +7,8 @@ What was checked, what was found and what is left, in plain words. Read [ONBOARD
 - Every change this repository adds to ROCm/k8s-gpu-dra-driver was run on a real AMD GPU, together with HAMi-DRA ([#172](https://github.com/Project-HAMi/HAMi-DRA/pull/172), merged, not released yet).
 - Two pods can share one GPU: each gets its own CUs and its own memory limit, enforced by the hook and by the kernel.
 - Each release passed a full end-to-end run on the card: 26 checks for `v0.2.0`, 28 for `v0.3.0` (adds the `brand` attribute) and 40 for `v0.4.0` (adds device health, the image check and the HAMi-DRA memory percentage, type matching and opt-out label).
-- What is left: the checks that need hardware this machine did not have (end of this file).
+- It also ran end to end on an AMD Instinct MI325X (gfx942, 304 CUs, 256 GiB) with HAMi-DRA: slices, the memory limit, the CU mask, PyTorch and vLLM all worked. Two things needed attention there: the host driver (see [Instinct MI325X](#instinct-mi325x)) and the GPU name, fixed in #30.
+- What is left: the checks that need hardware these machines did not have (end of this file).
 
 ## How we tested
 
@@ -16,6 +17,18 @@ What was checked, what was found and what is left, in plain words. Read [ONBOARD
 - ROCm 7.2.4 images for the test pods; Ollama 0.12.5 (`llama3.2:3b`) as a real workload.
 - The same node also has an NVIDIA GPU and runs the HAMi AMD device plugin, so the two paths were checked side by side.
 - Every check below was run on the node, and the cluster was cleaned up after each run.
+
+## Instinct MI325X
+
+One MI325X (PCI `0x74b9`, one GPU in SPX/NPS1 mode, 304 CUs, 261824 MiB), RKE2 v1.36.5 with HAMi-DRA from `main` (the webhook image `latest`; `v0.2.3` does not know AMD yet), Ubuntu 24.04, cgroup v2 with the `dmem` controller.
+
+- **Host driver.** The in-tree `amdgpu` of kernels 6.8 and 7.0 did not bind to this card (`Doesn't get TRN_MSG_ACK from pf`, probe failed with -22), so no GPU was published (`Discovered 0 AMD GPU devices`). What works is kernel 6.14 (`6.14.0-37-generic`, which has `dmem`) with `amdgpu-dkms` 6.16.13 from the ROCm 7.2.4 repository. `amdgpu-dkms` 6.16.13 does not build on kernels 6.17 and 7.0. Select the kernel in GRUB and check `lspci -k` shows `amdgpu` in use, and `/dev/kfd` exists, before installing the driver.
+- **Published device.** `deviceID: 0x74b9`, `computeUnits: 304`, `memory: 261824Mi`, `partitionProfile: spx_nps1`. AMD SMI reports the market name `AMD Radeon Graphics` for this card, so `productName` was `AMD_Radeon_Graphics` and `brand` was `Radeon`. Since #30 the driver names Instinct parts by device ID when the reported name is empty or generic: `productName: AMD_Instinct_MI325X`, `brand: Instinct`, and `amd.com/use-gputype: MI325X` matches.
+- **Slices.** Two `gpumem: 20000`, `gpucores: 25` Pods got CUs 0-75 and 76-151. `hipMalloc` of 19 GiB worked and 21 GiB was refused, with and without `LD_AUDIT`. A spin kernel took 31.8 ms in a slice and 7.6 ms without the mask, and 31.8 ms and 31.7 ms with both slices busy. PyTorch matmul ran at 756.7 TFLOPS without the mask, 224.0 in a slice and 207.7 and 207.8 with both busy. A 30 GB PyTorch allocation was refused.
+- **Claims.** `gpumem-percentage: 10` with `gpucores: 10` gave 26182 MiB and 31 CUs. The right `use-gpu-uuid` and `use-gputype` matched, wrong ones stayed Pending. A claim for more CUs than were free stayed Pending, a whole-GPU claim alone got no limits, and CU assignments survived a driver restart.
+- **vLLM.** `Qwen/Qwen2.5-0.5B-Instruct` ran in a 25 percent slice, saw 19.53 GiB and generated tokens.
+- **Monitor.** The HAMi-DRA monitor labelled its metrics `devicebrand="Instinct"` after #30.
+- **Not run here.** Several GPUs, compute partitions (DPX, QPX, CPX) and a real hardware fault.
 
 ## What was found and fixed
 
@@ -26,6 +39,7 @@ What was checked, what was found and what is left, in plain words. Read [ONBOARD
 - **`amd.com/use-gpu-uuid` and `amd.com/use-gputype` could not match.** The driver published no `uuid` and an empty `productName` on this card. Fixed in #2.
 - **`env -u LD_AUDIT` escaped the memory limit.** Fixed in #3 with the dmem cgroup cap.
 - **The monitor's `devicebrand` label was empty for AMD GPUs.** The driver published no `brand`. Fixed in #15.
+- **An MI325X was named `AMD Radeon Graphics`.** AMD SMI reports that market name for the card, so `productName`, `brand` and `use-gputype: MI325X` were wrong. Fixed in #30.
 - **Code scanning findings.** CodeQL flagged four integer conversions of topology values; Scorecard flagged unpinned images and tools, no fuzzing, and an advisory in `go.etcd.io/etcd/client/pkg/v3`. Fixed in #14.
 
 ## Every change of this repository
@@ -41,7 +55,7 @@ What was checked, what was found and what is left, in plain words. Read [ONBOARD
 | #5 to #12 dependency updates | `amd-hami-core` ce88cf4 (docs and CI only, the hook code is unchanged) and Go modules. Covered by the end-to-end runs below. | Nothing |
 | #13 README, STATUS.md and ONBOARDING.md | Docs only. | Nothing |
 | #14 code scanning fixes | Tests, 20 s of each new fuzz target and both image builds passed on the node; the new image published the card and a 2000 MiB slice stopped at 1792 MiB with and without `LD_AUDIT`. The CodeQL, Pinned-Dependencies, Fuzzing and Vulnerabilities alerts closed on `main`. | Nothing |
-| #15 `brand` attribute | ResourceSlice showed `brand: Radeon`; the HAMi-DRA monitor labelled its metrics `devicebrand="Radeon"`. | Instinct GPUs (`brand: Instinct`) |
+| #15 `brand` attribute | ResourceSlice showed `brand: Radeon`; the HAMi-DRA monitor labelled its metrics `devicebrand="Radeon"`. | Nothing: on an MI325X, `brand: Instinct` since #30 |
 | Several GPUs in one claim | Each GPU gets its own `HSA_CU_MASK` entry and `HIP_DEVICE_MEMORY_LIMIT_<index>`, in render node order. `HSA_CU_MASK=0:0-15;1:0-3` limited the card to 16 CUs (209 ms spin kernel instead of 106 ms), so the multi-GPU syntax works with ROCm 7.2.4; the rest is covered by unit tests. | A node with several GPUs |
 | Device health | Kubelet showed the slice's claim as `Healthy` in the pod status, and the `device health reporting is not supported` errors it logged every 5 s stopped. A transient `EBUSY` from `gpu_busy_percent` on this card is not reported as unhealthy. | A GPU that really fails |
 | Image check without dmem | With `--dmem-backend=false`, an `alpine` slice stopped at start with "the image uses musl, which does not load LD_AUDIT", a ROCm Ubuntu slice ran; with dmem on, the `alpine` slice ran, since the kernel caps its memory. | Nothing |
@@ -49,6 +63,6 @@ What was checked, what was found and what is left, in plain words. Read [ONBOARD
 
 ## What is not verified, and why
 
-- **Instinct GPUs, hardware partitions and several GPUs per node.** The test node has one RDNA4 card. The upstream partition and VFIO code is unchanged.
+- **Hardware partitions and several GPUs per node.** One test node has one RDNA4 card and the other one MI325X in SPX mode. The upstream partition and VFIO code is unchanged. Other Instinct models (MI300X, MI355X) were not run; the device ID names in #30 come from libdrm `amdgpu.ids`, except `0x74b9`, seen on the MI325X.
 - **Several shared GPUs in one container on real hardware.** The test node has one GPU. The GPUs of one claim are numbered in render node order; shared GPUs from two claims in one container are not supported.
 - **A process that drops `LD_AUDIT` on a node without the dmem controller.** The hook is the only memory limit there. Images that can not load the hook (musl, glibc older than 2.34) are stopped at start on such a node.

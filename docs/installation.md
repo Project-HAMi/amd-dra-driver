@@ -121,6 +121,14 @@ kubelet plugin DaemonSet pod. This container polls `/sys/class/kfd` and
 `/sys/module/amdgpu/drivers/` and blocks the plugin from starting until the
 kernel driver is loaded.
 
+A loaded module is not enough: on an Instinct MI325X the in-tree `amdgpu` of
+kernels 6.8 and 7.0 loaded but did not bind to the card, and the driver logged
+`Discovered 0 AMD GPU devices`. Check that `lspci -k` shows `amdgpu` in use for
+the GPU and that `/dev/kfd` exists. That card worked with kernel 6.14 and
+`amdgpu-dkms` 6.16.13 from the ROCm 7.2.4 repository; that DKMS version does not
+build on kernels 6.17 and 7.0. The kernel also needs the `dmem` cgroup controller
+(6.14 or newer) for the memory cap of slices.
+
 ### VFIO passthrough
 
 VFIO passthrough enables GPU allocation to VMs via KubeVirt or similar

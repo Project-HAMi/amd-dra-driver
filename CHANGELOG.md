@@ -10,6 +10,7 @@ Changes of this repository on top of [ROCm/k8s-gpu-dra-driver](https://github.co
 
 ### Fixed
 
+- An Instinct GPU that AMD SMI names `AMD Radeon Graphics` (the MI325X) is published as `AMD_Instinct_MI325X` with `brand: Instinct`, named from its PCI device ID, so `amd.com/use-gputype` and the monitor labels are right (#30).
 - The Security Insights file declares secret scanning with the tool type that OpenSSF baseline scanners read (#20).
 
 ## v0.4.0

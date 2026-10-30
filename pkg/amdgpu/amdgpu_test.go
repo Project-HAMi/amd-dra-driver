@@ -50,3 +50,18 @@ func TestProductNameAttribute(t *testing.T) {
 		}
 	}
 }
+
+func TestInstinctProductName(t *testing.T) {
+	cases := []struct{ id, current, want string }{
+		{"0x74b9", "AMD_Radeon_Graphics", "AMD_Instinct_MI325X"},
+		{"0x74B9", "", "AMD_Instinct_MI325X"},
+		{"0x74a1", "AMD_Instinct_MI300X", "AMD_Instinct_MI300X"},
+		{"0x74a1", "Custom_Name", "Custom_Name"},
+		{"0x1002", "AMD_Radeon_Graphics", "AMD_Radeon_Graphics"},
+	}
+	for _, c := range cases {
+		if got := InstinctProductName(c.id, c.current); got != c.want {
+			t.Errorf("InstinctProductName(%q, %q) = %q, want %q", c.id, c.current, got, c.want)
+		}
+	}
+}

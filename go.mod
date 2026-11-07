@@ -4,7 +4,7 @@ go 1.27.2
 
 require (
 	github.com/golang/glog v1.2.5
-	github.com/spf13/pflag v1.0.10
+	github.com/spf13/pflag v1.1.0
 	github.com/stretchr/testify v1.12.1
 	github.com/urfave/cli/v2 v2.27.7
 	golang.org/x/sys v0.49.0

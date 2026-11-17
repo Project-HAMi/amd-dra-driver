@@ -4,6 +4,10 @@ Changes of this repository on top of [ROCm/k8s-gpu-dra-driver](https://github.co
 
 ## Unreleased
 
+### Added
+
+- Compute sharing under `GPUSharing`: a claim that consumes 0 `computeUnits` gets no `HSA_CU_MASK` and runs on every CU of the GPU, next to other shares, with only its memory limited.
+
 ## v0.4.1
 
 ### Changed

@@ -108,7 +108,8 @@ func placeGPUSlice(gpu *AmdGpuInfo, consumed map[resourceapi.QualifiedName]resou
 	if err != nil {
 		return nil, err
 	}
-	slice := &gpuSlice{cus: cus, maskCUs: cuCount < int64(gpu.ComputeUnits)}
+	// 0 CUs is compute sharing: the share runs on every CU, unmasked.
+	slice := &gpuSlice{cus: cus, maskCUs: cuCount > 0 && cuCount < int64(gpu.ComputeUnits)}
 	if memBytes < int64(gpu.MemoryBytes) {
 		slice.memMiB = max(memBytes>>20, 1)
 	}

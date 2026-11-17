@@ -126,19 +126,19 @@ func gpuBrand(productName string) string {
 // shareGPUDevice lets several claims take slices of one whole GPU. A request
 // that names no capacity still consumes all memory and computeUnits (the
 // unconstrained default), so plain claims keep the whole GPU to themselves.
-// computeUnits is consumed in whole CUs. simdUnits defaults to zero: it follows
+// computeUnits is consumed in whole CUs; a claim that asks for 0 shares all
+// CUs of the GPU without a CU mask. simdUnits defaults to zero: it follows
 // the CUs a claim gets, and consuming all of it by default would stop a second
 // slice from fitting.
 func shareGPUDevice(device *resourceapi.Device, computeUnits int) {
 	device.AllowMultipleAllocations = ptr.To(true)
-	one := resource.NewQuantity(1, resource.DecimalSI)
+	zero := resource.NewQuantity(0, resource.DecimalSI)
 	cu := device.Capacity["computeUnits"]
 	cu.RequestPolicy = &resourceapi.CapacityRequestPolicy{
 		Default:    resource.NewQuantity(int64(computeUnits), resource.DecimalSI),
-		ValidRange: &resourceapi.CapacityRequestPolicyRange{Min: one, Step: one},
+		ValidRange: &resourceapi.CapacityRequestPolicyRange{Min: zero, Step: resource.NewQuantity(1, resource.DecimalSI)},
 	}
 	device.Capacity["computeUnits"] = cu
-	zero := resource.NewQuantity(0, resource.DecimalSI)
 	simd := device.Capacity["simdUnits"]
 	simd.RequestPolicy = &resourceapi.CapacityRequestPolicy{
 		Default:    zero,

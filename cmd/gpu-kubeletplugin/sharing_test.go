@@ -19,6 +19,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -114,6 +115,29 @@ func TestSliceEditsCheckLibcWithoutDmem(t *testing.T) {
 	assert.Empty(t, sliceEdits([]*gpuSlice{cus}, "/hook").Hooks)
 }
 
+func TestSliceEditsComputeSharing(t *testing.T) {
+	// A share with 0 CUs runs on all CUs: no mask, only the memory limit,
+	// and no CUs that later shares of the GPU must avoid.
+	sl, err := placeGPUSlice(rx9060xt(), consumed("2000Mi", 0), map[int]bool{0: true})
+	require.NoError(t, err)
+	assert.Empty(t, sl.cus)
+	edits := sliceEdits([]*gpuSlice{sl}, "/hook")
+	assert.Equal(t, []string{"HIP_DEVICE_MEMORY_LIMIT_0=2000m", "LD_AUDIT=" + vgpuHookContainerPath}, edits.Env)
+
+	// Prepared next to it, a 16-CU share still starts at CU 0.
+	state := &DeviceState{allocatable: AllocatableDevices{"gpu-1-129": {AmdGpu: rx9060xt()}}, vgpuHookHostPath: "/hook"}
+	shared := &PreparedDevice{Device: drapbv1.Device{DeviceName: "gpu-1-129"}}
+	result := &resourceapi.DeviceRequestAllocationResult{Device: "gpu-1-129", ConsumedCapacity: consumed("2000Mi", 0)}
+	require.NoError(t, state.applyGPUSlice(shared, result, nil, nil, nil))
+	state.applySliceEdits(PreparedDevices{shared})
+	assert.NotContains(t, strings.Join(shared.ContainerEdits.Env, " "), "HSA_CU_MASK")
+	masked := &PreparedDevice{Device: drapbv1.Device{DeviceName: "gpu-1-129"}}
+	result.ConsumedCapacity = consumed("2000Mi", 16)
+	require.NoError(t, state.applyGPUSlice(masked, result, PreparedClaims{"shared": {shared}}, nil, nil))
+	state.applySliceEdits(PreparedDevices{masked})
+	assert.Contains(t, masked.ContainerEdits.Env, "HSA_CU_MASK=0:0-15")
+}
+
 func TestFormatCUs(t *testing.T) {
 	assert.Equal(t, "0-3,8,10-11", formatCUs([]int{0, 1, 2, 3, 8, 10, 11}))
 	assert.Equal(t, "5", formatCUs([]int{5}))
@@ -126,6 +150,7 @@ func TestShareGPUDevice(t *testing.T) {
 	cu := device.Capacity["computeUnits"].RequestPolicy
 	assert.Equal(t, int64(32), cu.Default.Value())
 	assert.Equal(t, int64(1), cu.ValidRange.Step.Value())
+	assert.Equal(t, int64(0), cu.ValidRange.Min.Value(), "0 CUs requests compute sharing")
 	assert.Equal(t, int64(0), device.Capacity["simdUnits"].RequestPolicy.Default.Value())
 	// Memory stays unconstrained, so a request without it takes the whole GPU.
 	assert.Nil(t, device.Capacity["memory"].RequestPolicy)

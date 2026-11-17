@@ -4,9 +4,15 @@ Changes of this repository on top of [ROCm/k8s-gpu-dra-driver](https://github.co
 
 ## Unreleased
 
+## v0.5.0
+
 ### Added
 
-- Compute sharing under `GPUSharing`: a claim that consumes 0 `computeUnits` gets no `HSA_CU_MASK` and runs on every CU of the GPU, next to other shares, with only its memory limited.
+- Compute sharing under `GPUSharing`: a claim that consumes 0 `computeUnits` gets no `HSA_CU_MASK` and runs on every CU of the GPU, next to other shares, with only its memory limited (#55).
+
+### Changed
+
+- Dependency updates: Kubernetes libraries 1.37.2, gRPC 1.85.0, the Go and UBI 9 minimal base images, and amd-hami-core at a newer main (#34).
 
 ## v0.4.1
 
